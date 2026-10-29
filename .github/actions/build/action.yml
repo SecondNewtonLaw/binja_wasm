@@ -1,5 +1,5 @@
 name: build-plugin
-description: Build and test binja_wasm against one binaryninja-api ref and zip the DLL.
+description: Build and test binja_wasm against one binaryninja-api ref and zip the plugin library.
 inputs:
   ref:
     description: binaryninja-api tag or commit
@@ -7,61 +7,96 @@ inputs:
   label:
     description: Version label used in cache keys and the zip name
     required: true
+outputs:
+  zip:
+    description: Name of the produced zip
+    value: ${{ steps.package.outputs.zip }}
+  library:
+    description: Path of the built plugin library
+    value: ${{ steps.package.outputs.library }}
 runs:
   using: composite
   steps:
-    - run: git config --system core.longpaths true
+    - name: Prepare environment
+      shell: bash
+      run: |
+        case "$RUNNER_OS" in
+          Windows) preset=release;       os=win64; cpm=C:/cpm;                 cc=C:/ccache ;;
+          Linux)   preset=linux-release; os=linux; cpm="$HOME/.cache/cpm";     cc="$HOME/.cache/ccache" ;;
+          macOS)   preset=macos-release; os=macos; cpm="$HOME/.cache/cpm";     cc="$HOME/.cache/ccache" ;;
+        esac
+        {
+          echo "BW_PRESET=$preset"
+          echo "BW_OS=$os"
+          echo "CPM_SOURCE_CACHE=$cpm"
+          echo "CCACHE_DIR=$cc"
+        } >> "$GITHUB_ENV"
+    - name: Windows toolchain
+      if: runner.os == 'Windows'
       shell: pwsh
+      run: |
+        git config --system core.longpaths true
+        choco install ccache -y --no-progress
     - uses: ilammy/msvc-dev-cmd@v1
-    - run: choco install ccache -y --no-progress
-      shell: pwsh
+      if: runner.os == 'Windows'
+    - name: Linux toolchain
+      if: runner.os == 'Linux'
+      shell: bash
+      run: sudo apt-get update && sudo apt-get install -y ccache ninja-build
+    - name: macOS toolchain
+      if: runner.os == 'macOS'
+      shell: bash
+      run: brew install ccache ninja
     - uses: actions/cache/restore@v4
       with:
-        path: C:/cpm
-        key: cpm-${{ inputs.ref }}-${{ hashFiles('CMakeLists.txt', 'cmake/CPM.cmake') }}-${{ github.run_id }}-${{ github.run_attempt }}
+        path: ${{ env.CPM_SOURCE_CACHE }}
+        key: cpm-${{ env.BW_OS }}-${{ inputs.ref }}-${{ hashFiles('CMakeLists.txt', 'cmake/CPM.cmake') }}-${{ github.run_id }}-${{ github.run_attempt }}
         restore-keys: |
-          cpm-${{ inputs.ref }}-${{ hashFiles('CMakeLists.txt', 'cmake/CPM.cmake') }}-
-          cpm-${{ inputs.ref }}-
+          cpm-${{ env.BW_OS }}-${{ inputs.ref }}-${{ hashFiles('CMakeLists.txt', 'cmake/CPM.cmake') }}-
+          cpm-${{ env.BW_OS }}-${{ inputs.ref }}-
     - uses: actions/cache/restore@v4
       with:
-        path: C:/ccache
-        key: ccache-${{ inputs.label }}-${{ github.run_id }}-${{ github.run_attempt }}
+        path: ${{ env.CCACHE_DIR }}
+        key: ccache-${{ env.BW_OS }}-${{ inputs.label }}-${{ github.run_id }}-${{ github.run_attempt }}
         restore-keys: |
-          ccache-${{ inputs.label }}-
-          ccache-
+          ccache-${{ env.BW_OS }}-${{ inputs.label }}-
+          ccache-${{ env.BW_OS }}-
     - name: Configure
-      shell: pwsh
+      shell: bash
       run: >
-        cmake --preset release
+        cmake --preset "$BW_PRESET"
         -DBN_INSTALL_DIR=
         -DBN_ALLOW_STUBS=ON
         -DBN_API_REVISION="${{ inputs.ref }}"
         -DBN_USER_PLUGINS_DIR="${{ runner.temp }}/plugins"
     - name: Build
-      shell: pwsh
-      run: cmake --build --preset release
+      shell: bash
+      run: cmake --build --preset "$BW_PRESET"
     - name: Compiler cache statistics
       if: always()
-      shell: pwsh
+      shell: bash
       run: ccache --show-stats
     - name: Save CPM sources
       if: always()
       uses: actions/cache/save@v4
       with:
-        path: C:/cpm
-        key: cpm-${{ inputs.ref }}-${{ hashFiles('CMakeLists.txt', 'cmake/CPM.cmake') }}-${{ github.run_id }}-${{ github.run_attempt }}
+        path: ${{ env.CPM_SOURCE_CACHE }}
+        key: cpm-${{ env.BW_OS }}-${{ inputs.ref }}-${{ hashFiles('CMakeLists.txt', 'cmake/CPM.cmake') }}-${{ github.run_id }}-${{ github.run_attempt }}
     - name: Save compiler cache
       if: always()
       uses: actions/cache/save@v4
       with:
-        path: C:/ccache
-        key: ccache-${{ inputs.label }}-${{ github.run_id }}-${{ github.run_attempt }}
+        path: ${{ env.CCACHE_DIR }}
+        key: ccache-${{ env.BW_OS }}-${{ inputs.label }}-${{ github.run_id }}-${{ github.run_attempt }}
     - name: Test
-      shell: pwsh
-      run: ctest --test-dir cmake-build-release --output-on-failure
+      shell: bash
+      run: ctest --test-dir "cmake-build-$BW_PRESET" --output-on-failure
     - name: Package
-      shell: pwsh
+      id: package
+      shell: bash
       run: |
-        New-Item -ItemType Directory -Force dist | Out-Null
-        Copy-Item cmake-build-release/binja_wasm.dll dist/
-        Compress-Archive -Path dist/binja_wasm.dll -DestinationPath "binja_wasm-bn${{ inputs.label }}-win64.zip"
+        lib=$(ls cmake-build-$BW_PRESET/binja_wasm.{dll,so,dylib} 2>/dev/null | head -1)
+        zip="binja_wasm-bn${{ inputs.label }}-$BW_OS.zip"
+        (cd "$(dirname "$lib")" && cmake -E tar cf "$GITHUB_WORKSPACE/$zip" --format=zip "$(basename "$lib")")
+        echo "zip=$zip" >> "$GITHUB_OUTPUT"
+        echo "library=$lib" >> "$GITHUB_OUTPUT"

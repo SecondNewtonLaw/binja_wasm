@@ -16,8 +16,6 @@ concurrency:
 
 env:
   LLVM_ROOT: C:/Program Files/LLVM
-  CPM_SOURCE_CACHE: C:/cpm
-  CCACHE_DIR: C:/ccache
 
 jobs:
   plan:
@@ -37,22 +35,24 @@ jobs:
   build:
     needs: plan
     if: needs.plan.outputs.count != '0'
-    runs-on: windows-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
-    name: build (BN ${{ matrix.label }})
+        entry: ${{ fromJSON(needs.plan.outputs.matrix) }}
+        runner: [windows-latest, ubuntu-latest, macos-latest]
+    name: build (BN ${{ matrix.entry.label }}, ${{ matrix.runner }})
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/build
+      - id: build
+        uses: ./.github/actions/build
         with:
-          ref: ${{ matrix.ref }}
-          label: ${{ matrix.label }}
+          ref: ${{ matrix.entry.ref }}
+          label: ${{ matrix.entry.label }}
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.tag }}-${{ matrix.label }}
-          path: binja_wasm-bn${{ matrix.label }}-win64.zip
+          name: ${{ matrix.entry.tag }}-${{ matrix.entry.label }}-${{ matrix.runner }}
+          path: ${{ steps.build.outputs.zip }}
           if-no-files-found: error
 
   release:
@@ -74,14 +74,14 @@ jobs:
         run: |
           jq -c '.[]' <<<"$MATRIX" | while read -r e; do
             label=$(jq -r .label <<<"$e"); tag=$(jq -r .tag <<<"$e"); kind=$(jq -r .kind <<<"$e"); ref=$(jq -r .ref <<<"$e")
-            zip="out/$tag-$label/binja_wasm-bn$label-win64.zip"
-            [ -f "$zip" ] || { echo "skip $label: build failed"; continue; }
+            zips=(out/$tag-$label-*/binja_wasm-bn$label-*.zip)
+            [ -f "${zips[0]}" ] && [ "${#zips[@]}" -eq 3 ] || { echo "skip $label: not all platforms built"; continue; }
             if [ "$kind" = dev ]; then
               gh release delete "$tag" --cleanup-tag -y || true
-              gh release create "$tag" "$zip" --prerelease --title "Binary Ninja dev (${ref:0:7})" \
+              gh release create "$tag" "${zips[@]}" --prerelease --title "Binary Ninja dev (${ref:0:7})" \
                 --notes "Built against binaryninja-api dev @ $ref"
             else
-              gh release create "$tag" "$zip" --title "Binary Ninja $label" \
+              gh release create "$tag" "${zips[@]}" --title "Binary Ninja $label" \
                 --notes "Built against binaryninja-api tag stable/$label"
             fi
           done

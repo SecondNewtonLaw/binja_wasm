@@ -17,8 +17,6 @@ concurrency:
 
 env:
   LLVM_ROOT: C:/Program Files/LLVM
-  CPM_SOURCE_CACHE: C:/cpm
-  CCACHE_DIR: C:/ccache
 
 jobs:
   plan:
@@ -35,22 +33,24 @@ jobs:
 
   build:
     needs: plan
-    runs-on: windows-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: true
       matrix:
-        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
-    name: build (BN ${{ matrix.label }})
+        entry: ${{ fromJSON(needs.plan.outputs.matrix) }}
+        runner: [windows-latest, ubuntu-latest, macos-latest]
+    name: build (BN ${{ matrix.entry.label }}, ${{ matrix.runner }})
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/build
+      - id: build
+        uses: ./.github/actions/build
         with:
-          ref: ${{ matrix.ref }}
-          label: ${{ matrix.label }}
+          ref: ${{ matrix.entry.ref }}
+          label: ${{ matrix.entry.label }}
       - uses: actions/upload-artifact@v4
         with:
-          name: mm-${{ matrix.mm }}
-          path: cmake-build-release/binja_wasm.dll
+          name: mm-${{ matrix.entry.mm }}-${{ matrix.runner }}
+          path: ${{ steps.build.outputs.library }}
           if-no-files-found: error
 
   release:
@@ -74,7 +74,7 @@ jobs:
           rm -rf bin
           for mm in $(jq -r '.[].mm' <<<"$MATRIX"); do
             mkdir -p "bin/$mm"
-            cp "artifacts/mm-$mm/binja_wasm.dll" "bin/$mm/"
+            cp artifacts/mm-$mm-*/binja_wasm.* "bin/$mm/"
           done
           cur=$(jq -r .version plugin.json)
           new=${INPUT_VERSION:-$(awk -F. '{printf "%d.%d.%d", $1, $2, $3+1}' <<<"$cur")}
