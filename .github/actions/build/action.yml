@@ -94,7 +94,7 @@ runs:
       id: package
       shell: bash
       run: |
-        lib=$(ls cmake-build-$BW_PRESET/binja_wasm.{dll,so,dylib} 2>/dev/null | head -1)
+        for f in cmake-build-$BW_PRESET/binja_wasm.{dll,so,dylib}; do [ -f "$f" ] && lib=$f; done
         zip="binja_wasm-bn${{ inputs.label }}-$BW_OS.zip"
         (cd "$(dirname "$lib")" && cmake -E tar cf "$GITHUB_WORKSPACE/$zip" --format=zip "$(basename "$lib")")
         echo "zip=$zip" >> "$GITHUB_OUTPUT"
