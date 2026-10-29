@@ -81,7 +81,8 @@ jobs:
               gh release create "$tag" "${zips[@]}" --prerelease --title "Binary Ninja dev (${ref:0:7})" \
                 --notes "Built against binaryninja-api dev @ $ref"
             else
-              gh release create "$tag" "${zips[@]}" --title "Binary Ninja $label" \
-                --notes "Built against binaryninja-api tag stable/$label"
+              gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --title "$tag" \
+                --notes "Prebuilt binaries per Binary Ninja version (binja_wasm-bn<version>-<os>.zip)."
+              gh release upload "$tag" "${zips[@]}" --clobber
             fi
           done

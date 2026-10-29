@@ -15,14 +15,15 @@ stable=$(gh api --paginate "repos/$api/git/matching-refs/tags/stable/" --jq '.[]
       [ "$(printf '%s\n%s\n' "$min" "$v" | sort -V | head -1)" = "$min" ] && echo "$v"
     done)
 
-released=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName --jq '.[].tagName' || true)
+ptag="v$(jq -r .version plugin.json)"
+assets=$(gh release view "$ptag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null || true)
 
 entries=()
 add() { entries+=("$(jq -nc --arg l "$1" --arg r "$2" --arg t "$3" --arg k "$4" '{label:$l,ref:$r,tag:$t,kind:$k,mm:($l|split(".")[0:2]|join("."))}')"); }
 
 if [ "$mode" = minors ]; then
   for v in $(echo "$stable" | awk -F. '{last[$1"."$2]=$0} END{for(k in last) print last[k]}' | sort -V); do
-    add "$v" "stable/$v" "bn-$v" stable
+    add "$v" "stable/$v" "$ptag" stable
   done
   matrix=$(printf '%s\n' "${entries[@]:-}" | jq -sc 'map(select(. != null))')
   echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
@@ -32,12 +33,13 @@ if [ "$mode" = minors ]; then
 fi
 
 for v in $stable; do
-  grep -qx "bn-$v" <<<"$released" || add "$v" "stable/$v" "bn-$v" stable
+  grep -qx "binja_wasm-bn$v-linux.zip" <<<"$assets" && grep -qx "binja_wasm-bn$v-macos.zip" <<<"$assets" \
+    && grep -qx "binja_wasm-bn$v-win64.zip" <<<"$assets" || add "$v" "stable/$v" "$ptag" stable
 done
 
 sha=$(gh api "repos/$api/commits/dev" --jq .sha)
-if ! gh release view bn-dev --repo "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null | grep -q "$sha"; then
-  add "dev-${sha:0:7}" "$sha" bn-dev dev
+if ! gh release view dev --repo "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null | grep -q "$sha"; then
+  add "dev-${sha:0:7}" "$sha" dev dev
 fi
 
 matrix=$(printf '%s\n' "${entries[@]:-}" | jq -sc 'map(select(. != null))')
