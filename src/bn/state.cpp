@@ -4,13 +4,21 @@
 
 #include "bn/state.hpp"
 
-#include <atomic>
+#include <mutex>
 
 namespace bnwasm {
 
-static std::atomic<std::shared_ptr<State>> g_state;
+// libc++ has no std::atomic<std::shared_ptr>.
+static std::mutex g_mutex;
+static std::shared_ptr<State> g_state;
 
-void setState(std::shared_ptr<State> s) { g_state.store(std::move(s)); }
-std::shared_ptr<State> state() { return g_state.load(); }
+void setState(std::shared_ptr<State> s) {
+    std::lock_guard lock(g_mutex);
+    g_state = std::move(s);
+}
+std::shared_ptr<State> state() {
+    std::lock_guard lock(g_mutex);
+    return g_state;
+}
 
 } // namespace bnwasm
