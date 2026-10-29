@@ -21,6 +21,11 @@ endif()
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(cmake/CPM.cmake)
 
+option(USE_CCACHE "Use ccache as the compiler launcher when available" ON)
+if(USE_CCACHE)
+  include(cmake/ccache.cmake)
+endif()
+
 set(BN_INSTALL_DIR "C:/Users/Dottik/AppData/Local/Programs/Vector35/BinaryNinja"
     CACHE PATH "Binary Ninja install dir (contains binaryninjacore.dll)")
 set(BN_API_PATH "" CACHE PATH "Local binaryninja-api checkout; empty = fetch via CPM")
