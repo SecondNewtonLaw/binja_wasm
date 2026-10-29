@@ -70,6 +70,9 @@ add_library(wasm_core STATIC
   src/wasm/decode.cpp
   src/wasm/module.cpp
   src/wasm/analysis.cpp
+  src/wasm/branch_map.cpp
+  src/wasm/heights.cpp
+  src/wasm/sp_deltas.cpp
   src/wasm/pointers.cpp)
 target_include_directories(wasm_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_features(wasm_core PUBLIC cxx_std_23)

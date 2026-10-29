@@ -16,6 +16,7 @@
 #include "bn/state.hpp"
 #include "wasm/decode.hpp"
 #include "wasm/module.hpp"
+#include "wasm/opcodes.hpp"
 
 namespace bnwasm {
 
@@ -89,7 +90,7 @@ void WasmView::defineDataVariables(const wasm::Module &m) {
                 break;
             }
             pos += ins.size ? ins.size : 1;
-            if (ins.op == 0x41) {
+            if (ins.op == wasm::op::I32Const) {
                 last = static_cast<uint32_t>(ins.imm0);
                 continue;
             }
@@ -210,10 +211,10 @@ namespace {
 
 Ref<Type> valueType(uint8_t t, bool ptr = false) {
     switch (t) {
-    case 0x7F: return ptr ? Type::PointerType(4, Type::VoidType()) : Type::IntegerType(4, true);
-    case 0x7E: return Type::IntegerType(8, true);
-    case 0x7D: return Type::FloatType(4);
-    case 0x7C: return Type::FloatType(8);
+    case wasm::kI32: return ptr ? Type::PointerType(4, Type::VoidType()) : Type::IntegerType(4, true);
+    case wasm::kI64: return Type::IntegerType(8, true);
+    case wasm::kF32: return Type::FloatType(4);
+    case wasm::kF64: return Type::FloatType(8);
     default: return Type::IntegerType(8, true);
     }
 }

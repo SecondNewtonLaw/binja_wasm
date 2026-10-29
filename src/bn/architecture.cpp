@@ -85,49 +85,48 @@ bool WasmArchitecture::GetInstructionInfo(const uint8_t *, uint64_t addr, size_t
     const uint64_t *target = fa ? fa->branchTarget(off) : nullptr;
     const auto at = [&](uint64_t t) { return t + kCodeBase; };
     switch (ins.op) {
-    case 0x10:
-    case 0x12:
+    case wasm::op::Call:
+    case wasm::op::ReturnCall:
         if (static_cast<uint64_t>(ins.imm0) < st->module.functions.size()) {
             result.AddBranch(CallDestination, funcAddress(st->module, static_cast<uint32_t>(ins.imm0)));
-            if (ins.op == 0x12)
+            if (ins.op == wasm::op::ReturnCall)
                 result.AddBranch(FunctionReturn);
         }
         break;
-    case 0x04:
+    case wasm::op::If:
         if (target && *target != wasm::kFunctionEnd) {
             result.AddBranch(FalseBranch, at(*target));
             result.AddBranch(TrueBranch, addr + ins.size);
         }
         break;
-    case 0xD5:
-    case 0xD6:
-    case 0x0D:
+    case wasm::op::BrOnNull:
+    case wasm::op::BrOnNonNull:
+    case wasm::op::BrIf:
         if (target && *target != wasm::kFunctionEnd) {
             result.AddBranch(TrueBranch, at(*target));
             result.AddBranch(FalseBranch, addr + ins.size);
         }
         break;
-    case 0x0E: {
+    case wasm::op::BrTable:
         result.AddBranch(UnresolvedBranch);  // targets come from Function::SetAutoIndirectBranches
         break;
-    }
-    case 0x0F:
+    case wasm::op::Return:
         result.AddBranch(FunctionReturn);
         break;
-    case 0x00:
-    case 0x08:
-    case 0x09:
-    case 0x0A:
+    case wasm::op::Unreachable:
+    case wasm::op::Throw:
+    case wasm::op::Rethrow:
+    case wasm::op::ThrowRef:
         result.AddBranch(ExceptionBranch);
         break;
-    case 0x0B:
+    case wasm::op::End:
         if (target && *target != wasm::kFunctionEnd)
             result.AddBranch(UnconditionalBranch, at(*target));
         else if (target)
             result.AddBranch(FunctionReturn);
         break;
-    case 0x13:
-    case 0x15:
+    case wasm::op::ReturnCallIndirect:
+    case wasm::op::ReturnCallRef:
         result.AddBranch(FunctionReturn);
         break;
     default:

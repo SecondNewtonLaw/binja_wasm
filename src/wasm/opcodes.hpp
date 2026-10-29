@@ -17,6 +17,9 @@ constexpr uint32_t kPrefixFD = 0xFD00;
 constexpr uint32_t kPrefixFE = 0xFE00;
 
 constexpr uint8_t kI32 = 0x7F;   // value type bytes
+constexpr uint8_t kI64 = 0x7E;
+constexpr uint8_t kF32 = 0x7D;
+constexpr uint8_t kF64 = 0x7C;
 constexpr uint8_t kV128 = 0x7B;
 
 // Named ids for the opcodes the analyses and the lifter dispatch on.
@@ -66,10 +69,19 @@ constexpr uint32_t I32Const = 0x41;
 constexpr uint32_t I64Const = 0x42;
 constexpr uint32_t F32Const = 0x43;
 constexpr uint32_t F64Const = 0x44;
+constexpr uint32_t I32Eqz = 0x45;
+constexpr uint32_t I64Eqz = 0x50;
+constexpr uint32_t NumericFirst = I32Eqz;
+constexpr uint32_t NumericLast = 0xA6;   // f64.copysign
 constexpr uint32_t I32Add = 0x6A;
 constexpr uint32_t I32Sub = 0x6B;
+constexpr uint32_t ConvertFirst = 0xA7;  // i32.wrap_i64
+constexpr uint32_t ConvertLast = 0xC4;   // i64.extend32_s
 constexpr uint32_t RefNull = 0xD0;
+constexpr uint32_t RefIsNull = 0xD1;
 constexpr uint32_t RefFunc = 0xD2;
+constexpr uint32_t RefEq = 0xD3;
+constexpr uint32_t RefAsNonNull = 0xD4;
 constexpr uint32_t BrOnNull = 0xD5;
 constexpr uint32_t BrOnNonNull = 0xD6;
 constexpr uint32_t V128Load = kPrefixFD | 0x00;

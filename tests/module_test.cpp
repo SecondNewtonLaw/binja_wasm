@@ -38,6 +38,66 @@ static void handmade() {
     assert(fa->heightAt(25) == 0);
 }
 
+struct Fingerprint {
+    uint64_t sum = 0;
+
+    static uint64_t mix(uint64_t h, uint64_t v) {
+        h ^= v + 0x9E3779B97F4A7C15ull + (h << 6) + (h >> 2);
+        return h * 0xFF51AFD7ED558CCDull;
+    }
+    // Entry hashes are summed so unordered_map iteration order does not matter.
+    template <typename Map, typename Fn> void map(uint64_t tag, const Map &m, Fn entry) {
+        for (const auto &[k, v] : m)
+            sum += entry(mix(tag, static_cast<uint64_t>(k)), v);
+    }
+    static uint64_t hashMoves(uint64_t h, const std::vector<wasm::Move> &mv) {
+        for (const auto &x : mv)
+            h = mix(mix(mix(h, x.src), x.dst), x.vec);
+        return h;
+    }
+
+    void add(const wasm::FunctionAnalysis &fa) {
+        sum += mix(mix(fa.start, fa.size), fa.unknownSets);
+        for (size_t i = 0; i < fa.offsets.size(); ++i)
+            sum += mix(mix(1, fa.offsets[i]), fa.heights[i]);
+        map(2, fa.branch, [](uint64_t h, uint64_t v) { return mix(h, v); });
+        map(3, fa.tables, [](uint64_t h, const std::vector<uint64_t> &v) {
+            for (uint64_t x : v)
+                h = mix(h, x);
+            return h;
+        });
+        map(4, fa.moves, [](uint64_t h, const std::vector<wasm::Move> &v) { return hashMoves(h, v); });
+        map(5, fa.tableMoves, [](uint64_t h, const std::vector<std::vector<wasm::Move>> &v) {
+            for (const auto &mv : v)
+                h = hashMoves(mix(h, 99), mv);
+            return h;
+        });
+        for (uint64_t a : fa.vecOps)
+            sum += mix(6, a);
+        map(7, fa.catches, [](uint64_t h, const std::vector<wasm::CatchClause> &v) {
+            for (const auto &c : v)
+                h = mix(mix(mix(mix(mix(h, c.kind), c.tag), c.target), c.entry), c.arity);
+            return h;
+        });
+        map(8, fa.tryChain, [](uint64_t h, const std::vector<uint64_t> &v) {
+            for (uint64_t x : v)
+                h = mix(h, x);
+            return h;
+        });
+        const auto adj = [](uint64_t h, int64_t v) { return mix(h, static_cast<uint64_t>(v)); };
+        map(9, fa.setAdj, adj);
+        map(10, fa.edgeAdj, adj);
+        map(11, fa.fallAdj, adj);
+        const auto adjVec = [](uint64_t h, const std::vector<int64_t> &v) {
+            for (int64_t x : v)
+                h = mix(h, static_cast<uint64_t>(x));
+            return h;
+        };
+        map(12, fa.tableAdj, adjVec);
+        map(13, fa.catchAdj, adjVec);
+    }
+};
+
 static void realModule(const char *path) {
     std::ifstream f(path, std::ios::binary);
     std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
@@ -45,12 +105,14 @@ static void realModule(const char *path) {
     assert(m);
     size_t instrs = 0, failed = 0, sets = 0, unknownSets = 0, edges = 0, reconciled = 0;
     size_t tblMoves = 0, tblAdj = 0, vecSel = 0, tries = 0, throwing = 0;
+    Fingerprint fp;
     for (const uint64_t start : m->starts) {
         const auto fa = wasm::analyze(*m, start);
         if (!fa) {
             ++failed;
             continue;
         }
+        fp.add(*fa);
         instrs += fa->offsets.size();
         sets += fa->setAdj.size();
         unknownSets += fa->unknownSets;
@@ -101,6 +163,12 @@ static void realModule(const char *path) {
         pr += ptrs.ret[f];
     }
     std::printf("ptr: params=%zu/%zu rets=%zu/%zu\n", pp, params, pr, ptrs.ret.size());
+    for (size_t f = 0; f < ptrs.param.size(); ++f) {
+        for (char c : ptrs.param[f])
+            fp.sum += Fingerprint::mix(f, c);
+        fp.sum += Fingerprint::mix(~f, ptrs.ret[f]);
+    }
+    std::printf("fingerprint=%016llx\n", static_cast<unsigned long long>(fp.sum));
     std::printf("sp: tracked_sets=%zu unknown_sets=%zu reconcile_edges=%zu functions_reconciled=%zu\n", sets,
                 unknownSets, edges, reconciled);
     std::printf("br_table: moves=%zu spadj=%zu  vec_select=%zu  try_table=%zu throwing=%zu\n", tblMoves, tblAdj,
