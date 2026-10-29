@@ -50,10 +50,10 @@ runs:
     - uses: actions/cache/restore@v4
       with:
         path: ${{ env.CPM_SOURCE_CACHE }}
-        key: cpm-${{ env.BW_OS }}-${{ inputs.ref }}-${{ hashFiles('CMakeLists.txt', 'cmake/CPM.cmake') }}-${{ github.run_id }}-${{ github.run_attempt }}
+        key: cpm2-${{ env.BW_OS }}-${{ inputs.ref }}-${{ hashFiles('CMakeLists.txt', 'cmake/CPM.cmake') }}-${{ github.run_id }}-${{ github.run_attempt }}
         restore-keys: |
-          cpm-${{ env.BW_OS }}-${{ inputs.ref }}-${{ hashFiles('CMakeLists.txt', 'cmake/CPM.cmake') }}-
-          cpm-${{ env.BW_OS }}-${{ inputs.ref }}-
+          cpm2-${{ env.BW_OS }}-${{ inputs.ref }}-${{ hashFiles('CMakeLists.txt', 'cmake/CPM.cmake') }}-
+          cpm2-${{ env.BW_OS }}-${{ inputs.ref }}-
     - uses: actions/cache/restore@v4
       with:
         path: ${{ env.CCACHE_DIR }}
@@ -69,6 +69,11 @@ runs:
         -DBN_ALLOW_STUBS=ON
         -DBN_API_REVISION="${{ inputs.ref }}"
         -DBN_USER_PLUGINS_DIR="${{ runner.temp }}/plugins"
+    - name: Save CPM sources
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ env.CPM_SOURCE_CACHE }}
+        key: cpm2-${{ env.BW_OS }}-${{ inputs.ref }}-${{ hashFiles('CMakeLists.txt', 'cmake/CPM.cmake') }}-${{ github.run_id }}-${{ github.run_attempt }}
     - name: Build
       shell: bash
       run: cmake --build --preset "$BW_PRESET"
@@ -76,12 +81,6 @@ runs:
       if: always()
       shell: bash
       run: ccache --show-stats
-    - name: Save CPM sources
-      if: always()
-      uses: actions/cache/save@v4
-      with:
-        path: ${{ env.CPM_SOURCE_CACHE }}
-        key: cpm-${{ env.BW_OS }}-${{ inputs.ref }}-${{ hashFiles('CMakeLists.txt', 'cmake/CPM.cmake') }}-${{ github.run_id }}-${{ github.run_attempt }}
     - name: Save compiler cache
       if: always()
       uses: actions/cache/save@v4
