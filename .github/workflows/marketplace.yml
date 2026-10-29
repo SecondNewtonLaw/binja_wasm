@@ -52,6 +52,11 @@ jobs:
           name: mm-${{ matrix.entry.mm }}-${{ matrix.runner }}
           path: ${{ steps.build.outputs.library }}
           if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zip-${{ matrix.entry.mm }}-${{ matrix.runner }}
+          path: ${{ steps.build.outputs.zip }}
+          if-no-files-found: error
 
   release:
     needs: [plan, build]
@@ -90,4 +95,4 @@ jobs:
           git commit -m "Release $VERSION"
           git tag "v$VERSION"
           git push origin HEAD "v$VERSION"
-          gh release create "v$VERSION" --title "v$VERSION" --generate-notes
+          gh release create "v$VERSION" artifacts/zip-*/*.zip --title "v$VERSION" --generate-notes
