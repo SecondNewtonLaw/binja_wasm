@@ -17,7 +17,7 @@ concurrency:
 
 env:
   LLVM_ROOT: C:/Program Files/LLVM
-  CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-cache
+  CPM_SOURCE_CACHE: C:/cpm
 
 jobs:
   plan:
@@ -48,11 +48,12 @@ jobs:
         include: ${{ fromJSON(needs.plan.outputs.matrix) }}
     name: build (BN ${{ matrix.label }})
     steps:
+      - run: git config --system core.longpaths true
       - uses: actions/checkout@v4
       - uses: ilammy/msvc-dev-cmd@v1
       - uses: actions/cache@v4
         with:
-          path: .cpm-cache
+          path: C:/cpm
           key: cpm-${{ matrix.ref }}-${{ hashFiles('CMakeLists.txt', 'cmake/CPM.cmake') }}
           restore-keys: cpm-
       - name: Configure
