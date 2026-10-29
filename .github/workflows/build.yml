@@ -1,0 +1,112 @@
+name: build
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
+
+env:
+  LLVM_ROOT: C:/Program Files/LLVM
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-cache
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      count: ${{ steps.plan.outputs.count }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MIN_BN: ${{ vars.MIN_BN || '5.0' }}
+        run: |
+          if [ "${{ github.event_name }}" = schedule ] || [ "${{ github.event_name }}" = workflow_dispatch ]; then
+            bash .github/scripts/plan.sh release
+          else
+            bash .github/scripts/plan.sh ci
+          fi
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.count != '0'
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    name: build (BN ${{ matrix.label }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+      - uses: actions/cache@v4
+        with:
+          path: .cpm-cache
+          key: cpm-${{ matrix.ref }}-${{ hashFiles('CMakeLists.txt', 'cmake/CPM.cmake') }}
+          restore-keys: cpm-
+      - name: Configure
+        shell: pwsh
+        run: >
+          cmake --preset release
+          -DBN_INSTALL_DIR=
+          -DBN_ALLOW_STUBS=ON
+          -DBN_API_REVISION="${{ matrix.ref }}"
+          -DBN_USER_PLUGINS_DIR="${{ runner.temp }}/plugins"
+      - name: Build
+        run: cmake --build --preset release
+      - name: Test
+        run: ctest --test-dir cmake-build-release --output-on-failure
+      - name: Package
+        shell: pwsh
+        run: |
+          $name = "binja_wasm-bn${{ matrix.label }}-win64"
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item cmake-build-release/binja_wasm.dll dist/
+          Compress-Archive -Path dist/binja_wasm.dll -DestinationPath "$name.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.tag }}-${{ matrix.label }}
+          path: binja_wasm-bn${{ matrix.label }}-win64.zip
+          if-no-files-found: error
+
+  release:
+    needs: [plan, build]
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+      - name: Publish
+        env:
+          MATRIX: ${{ needs.plan.outputs.matrix }}
+        run: |
+          jq -c '.[]' <<<"$MATRIX" | while read -r e; do
+            label=$(jq -r .label <<<"$e"); tag=$(jq -r .tag <<<"$e"); kind=$(jq -r .kind <<<"$e"); ref=$(jq -r .ref <<<"$e")
+            zip="out/$tag-$label/binja_wasm-bn$label-win64.zip"
+            [ -f "$zip" ] || { echo "skip $label: build failed"; continue; }
+            if [ "$kind" = dev ]; then
+              gh release delete "$tag" --cleanup-tag -y || true
+              gh release create "$tag" "$zip" --prerelease --title "Binary Ninja dev (${ref:0:7})" \
+                --notes "Built against binaryninja-api dev @ $ref"
+            else
+              gh release create "$tag" "$zip" --title "Binary Ninja $label" \
+                --notes "Built against binaryninja-api tag stable/$label"
+            fi
+          done

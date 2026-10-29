@@ -1,0 +1,29 @@
+# Build trees / IDE
+/.idea/
+/.vs/
+/.vscode/
+/build/
+/out/
+/artifacts/
+/bin/
+/cmake-build*/
+/.cpm/
+/.cpm-cache/
+/cmake/CPM_*
+/cpm-package-lock.cmake
+/CMakeFiles/
+/CMakeCache.txt
+compile_commands.json
+
+# Profiling / scratch
+/vtune/
+/graphify-out/
+*.user
+*.log
+
+# Binary Ninja databases
+*.bndb
+
+# OS
+.DS_Store
+Thumbs.db
