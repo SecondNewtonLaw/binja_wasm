@@ -26,7 +26,7 @@
     "Darwin": "Prebuilt native binary; no extra steps. Remove any Python WASM plugin (binjawa) so only one view claims .wasm."
   },
   "dependencies": {},
-  "version": "0.1.1",
+  "version": "0.1.2",
   "minimumbinaryninjaversion": 8614,
   "projectUrl": "https://github.com/SecondNewtonLaw/binja_wasm"
 }
