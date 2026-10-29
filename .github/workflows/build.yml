@@ -31,7 +31,7 @@ jobs:
       - id: plan
         env:
           GH_TOKEN: ${{ github.token }}
-          MIN_BN: ${{ vars.MIN_BN || '5.0' }}
+          MIN_BN: ${{ vars.MIN_BN || '5.2' }}
         run: bash .github/scripts/plan.sh release
 
   build:

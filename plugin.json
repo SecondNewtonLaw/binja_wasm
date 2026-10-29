@@ -16,6 +16,6 @@
   },
   "dependencies": {},
   "version": "0.1.0",
-  "minimumbinaryninjaversion": 8005,
+  "minimumbinaryninjaversion": 8614,
   "projectUrl": "https://github.com/SecondNewtonLaw/binja_wasm"
 }

@@ -18,6 +18,11 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     -Wno-macro-redefined)
 endif()
 
+# binaryninja-api base/ tests bare WIN32, which only the MSVC driver defines.
+if(WIN32)
+  add_compile_definitions(WIN32 _WINDOWS)
+endif()
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(cmake/CPM.cmake)
 

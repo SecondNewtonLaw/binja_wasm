@@ -2,11 +2,11 @@
 # Emits a GitHub Actions build matrix of Binary Ninja API refs to build.
 #   plan.sh release  stable tags and dev head not yet released here
 #   plan.sh minors   latest stable tag of each major.minor (marketplace)
-# Env: GH_TOKEN, GITHUB_REPOSITORY, MIN_BN (default 5.0), GITHUB_OUTPUT
+# Env: GH_TOKEN, GITHUB_REPOSITORY, MIN_BN (default 5.2), GITHUB_OUTPUT
 set -euo pipefail
 
 mode=${1:-release}
-min=${MIN_BN:-5.0}
+min=${MIN_BN:-5.2}
 api=Vector35/binaryninja-api
 
 stable=$(gh api --paginate "repos/$api/git/matching-refs/tags/stable/" --jq '.[].ref' \
