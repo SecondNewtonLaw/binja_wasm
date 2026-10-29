@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 # Emits a GitHub Actions build matrix of Binary Ninja API refs to build.
-#   plan.sh ci       latest stable + dev head (always)
 #   plan.sh release  stable tags and dev head not yet released here
 #   plan.sh minors   latest stable tag of each major.minor (marketplace)
 # Env: GH_TOKEN, GITHUB_REPOSITORY, MIN_BN (default 5.0), GITHUB_OUTPUT
 set -euo pipefail
 
-mode=${1:-ci}
+mode=${1:-release}
 min=${MIN_BN:-5.0}
 api=Vector35/binaryninja-api
 
@@ -32,17 +31,12 @@ if [ "$mode" = minors ]; then
   exit 0
 fi
 
-if [ "$mode" = ci ]; then
-  v=$(echo "$stable" | tail -1)
-  [ -n "$v" ] && add "$v" "stable/$v" "bn-$v" stable
-else
-  for v in $stable; do
-    grep -qx "bn-$v" <<<"$released" || add "$v" "stable/$v" "bn-$v" stable
-  done
-fi
+for v in $stable; do
+  grep -qx "bn-$v" <<<"$released" || add "$v" "stable/$v" "bn-$v" stable
+done
 
 sha=$(gh api "repos/$api/commits/dev" --jq .sha)
-if [ "$mode" = ci ] || ! gh release view bn-dev --repo "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null | grep -q "$sha"; then
+if ! gh release view bn-dev --repo "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null | grep -q "$sha"; then
   add "dev-${sha:0:7}" "$sha" bn-dev dev
 fi
 

@@ -3,7 +3,6 @@ name: build
 on:
   push:
     branches: [main, master]
-  pull_request:
   schedule:
     - cron: "17 */6 * * *"
   workflow_dispatch:
@@ -22,6 +21,7 @@ env:
 
 jobs:
   plan:
+    if: github.event_name != 'push' || startsWith(github.event.head_commit.message, 'release:')
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
@@ -32,12 +32,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           MIN_BN: ${{ vars.MIN_BN || '5.0' }}
-        run: |
-          if [ "${{ github.event_name }}" = schedule ] || [ "${{ github.event_name }}" = workflow_dispatch ]; then
-            bash .github/scripts/plan.sh release
-          else
-            bash .github/scripts/plan.sh ci
-          fi
+        run: bash .github/scripts/plan.sh release
 
   build:
     needs: plan
@@ -62,7 +57,7 @@ jobs:
 
   release:
     needs: [plan, build]
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: always() && needs.plan.result == 'success' && needs.build.result != 'skipped'
     runs-on: ubuntu-latest
     permissions:
       contents: write
