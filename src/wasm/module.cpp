@@ -11,6 +11,7 @@
 #include <map>
 
 #include "wasm/decode.hpp"
+#include "wasm/opcodes.hpp"
 
 namespace wasm {
 
@@ -136,12 +137,12 @@ static std::optional<Module> parse(std::vector<uint8_t> bytes) {
                 if (typed) {
                     const auto &p = m.types[definedTypes[j]].params;
                     ltypes.assign(p.begin(), p.begin() + std::min(p.size(), kLocalLimit));
-                    simd = std::find(p.begin(), p.end(), 0x7B) != p.end();
+                    simd = std::find(p.begin(), p.end(), kV128) != p.end();
                 }
                 for (uint64_t g = 0; g < groups; ++g) {
                     const uint64_t c = r.uleb();
                     const uint8_t t = data[r.pos];
-                    simd = simd || t == 0x7B;
+                    simd = simd || t == kV128;
                     ltypes.insert(ltypes.end(), std::min<uint64_t>(c, kLocalLimit - std::min(ltypes.size(), kLocalLimit)), t);
                     r.valtype();
                 }
@@ -163,13 +164,13 @@ static std::optional<Module> parse(std::vector<uint8_t> bytes) {
                 uint64_t memAddr = 0;
                 if (active) {
                     const uint8_t op = r.u8();
-                    if (op == 0x41)
+                    if (op == op::I32Const)
                         memAddr = static_cast<uint32_t>(r.sleb());
-                    else if (op == 0x42)
+                    else if (op == op::I64Const)
                         memAddr = static_cast<uint64_t>(r.sleb());
                     else
                         active = false;
-                    while (r.u8() != 0x0B) {
+                    while (r.u8() != op::End) {
                     }
                 }
                 const uint64_t sz = r.uleb();

@@ -30,7 +30,7 @@ void branchMap(const Module &m, FunctionAnalysis &fa) {
     while (addr < end) {
         const Instr ins = decode(data, addr);
         const uint32_t op = ins.op;
-        if (op == 0x1F) {
+        if (op == op::TryTable) {
             // catch labels count from outside the try_table
             auto &clauses = fa.catches[addr];
             for (size_t k = 0; k < ins.catches.size(); ++k) {
@@ -45,18 +45,18 @@ void branchMap(const Module &m, FunctionAnalysis &fa) {
                     f.pending.push_back({addr, -static_cast<int>(k) - 2});
             }
             stack.push_back({'b', addr, {}, 0});
-        } else if (op == 0x02 || op == 0x06) {
+        } else if (op == op::Block || op == op::Try) {
             stack.push_back({'b', addr, {}, 0});
-        } else if (op == 0x03) {
+        } else if (op == op::Loop) {
             stack.push_back({'l', addr, {}, 0});
-        } else if (op == 0x04) {
+        } else if (op == op::If) {
             stack.push_back({'i', addr, {}, 0});
-        } else if (op == 0x05 && stack.back().kind == 'i') {
+        } else if (op == op::Else && stack.back().kind == 'i') {
             Frame &f = stack.back();
             fa.branch[f.begin] = addr;
             f.kind = 'e';
             f.elsePrev = prev;
-        } else if (op == 0x0C || op == 0x0D || op == 0xD5 || op == 0xD6) {
+        } else if (op == op::Br || op == op::BrIf || op == op::BrOnNull || op == op::BrOnNonNull) {
             const auto label = static_cast<uint64_t>(ins.imm0);
             if (label < stack.size()) {
                 Frame &f = stack[stack.size() - 1 - label];
@@ -65,7 +65,7 @@ void branchMap(const Module &m, FunctionAnalysis &fa) {
                 else
                     f.pending.push_back({addr, -1});
             }
-        } else if (op == 0x0E) {
+        } else if (op == op::BrTable) {
             const auto labels = tableLabels(data, addr);
             auto &targets = fa.tables[addr];
             targets.assign(labels.size(), kUnresolved);
@@ -78,7 +78,7 @@ void branchMap(const Module &m, FunctionAnalysis &fa) {
                 else
                     f.pending.push_back({addr, static_cast<int>(k)});
             }
-        } else if (op == 0x0B || op == 0x18) {
+        } else if (op == op::End || op == op::Delegate) {
             Frame f = std::move(stack.back());
             stack.pop_back();
             if (f.kind == 'i')
@@ -105,11 +105,11 @@ void branchMap(const Module &m, FunctionAnalysis &fa) {
 
 Effect effectOf(const Module &m, const Instr &ins) {
     const uint32_t op = ins.op;
-    if (op == 0x10 || op == 0x12) {
+    if (op == op::Call || op == op::ReturnCall) {
         const FuncType *s = m.funcSig(static_cast<uint32_t>(ins.imm0));
         return s ? Effect{static_cast<int>(s->params.size()), static_cast<int>(s->results.size())} : Effect{0, 0};
     }
-    if (op == 0x11 || op == 0x13 || op == 0x14 || op == 0x15) {
+    if (op == op::CallIndirect || op == op::ReturnCallIndirect || op == op::CallRef || op == op::ReturnCallRef) {
         const FuncType *s = m.sig(static_cast<uint32_t>(ins.imm0));
         return s ? Effect{static_cast<int>(s->params.size()) + 1, static_cast<int>(s->results.size())} : Effect{1, 0};
     }
@@ -135,7 +135,7 @@ void heights(const Module &m, FunctionAnalysis &fa) {
     std::vector<uint8_t> ty;  // per operand slot, kept the same length as the height
     const auto lt = m.localTypes.find(fa.start);
     const auto vecLocal = [&](int64_t i) {
-        return lt != m.localTypes.end() && i >= 0 && static_cast<size_t>(i) < lt->second.size() && lt->second[i] == 0x7B;
+        return lt != m.localTypes.end() && i >= 0 && static_cast<size_t>(i) < lt->second.size() && lt->second[i] == kV128;
     };
     // Moves that carry the top `frame.branchArity` values below height `top` to the label's slots.
     const auto branchMoves = [&](const HFrame &f, int top) {
@@ -154,7 +154,7 @@ void heights(const Module &m, FunctionAnalysis &fa) {
     const auto pushResults = [&](const FuncType *s) {
         if (s)
             for (uint8_t t : s->results)
-                ty.push_back(t == 0x7B);
+                ty.push_back(t == kV128);
     };
 
     int h = 0;
@@ -168,7 +168,8 @@ void heights(const Module &m, FunctionAnalysis &fa) {
         const size_t slot = fa.heights.size() - 1;
         ty.resize(h, 0);
 
-        if (op == 0x10 || op == 0x11 || op == 0x14 || op == 0x08 || op == 0x09 || op == 0x0A) {
+        if (op == op::Call || op == op::CallIndirect || op == op::CallRef || op == op::Throw || op == op::Rethrow ||
+            op == op::ThrowRef) {
             std::vector<uint64_t> chain;
             for (size_t k = frames.size(); k-- > 0;)
                 if (frames[k].tryAddr != kNoTry)
@@ -186,13 +187,13 @@ void heights(const Module &m, FunctionAnalysis &fa) {
                 if (const FuncType *s = m.sig(static_cast<uint32_t>(v))) {
                     p = static_cast<int>(s->params.size()), r = static_cast<int>(s->results.size());
                     for (uint8_t t : s->results)
-                        resTy.push_back(t == 0x7B);
+                        resTy.push_back(t == kV128);
                 }
             } else {
                 r = 1;
-                resTy.push_back((v & 0x7F) == 0x7B);
+                resTy.push_back((v & 0x7F) == kV128);
             }
-            if (op == 0x04) {
+            if (op == op::If) {
                 h = std::max(h - 1, 0);
                 ty.resize(h);
             }
@@ -200,7 +201,7 @@ void heights(const Module &m, FunctionAnalysis &fa) {
             std::vector<uint8_t> paramTy;
             for (int i = 0; i < p; ++i)
                 paramTy.push_back(static_cast<size_t>(entry + i) < ty.size() ? ty[entry + i] : 0);
-            if (op == 0x1F) {
+            if (op == op::TryTable) {
                 if (const auto c = fa.catches.find(addr); c != fa.catches.end()) {
                     for (size_t k = 0; k < ins.catches.size() && k < c->second.size(); ++k) {
                         if (const HFrame *f = frameAt(ins.catches[k].label)) {
@@ -210,17 +211,17 @@ void heights(const Module &m, FunctionAnalysis &fa) {
                     }
                 }
             }
-            frames.push_back({entry, op == 0x03 ? p : r, r, p, std::move(paramTy), std::move(resTy),
-                              op == 0x1F ? addr : kNoTry});
-        } else if (op == 0x05) {
+            frames.push_back({entry, op == op::Loop ? p : r, r, p, std::move(paramTy), std::move(resTy),
+                              op == op::TryTable ? addr : kNoTry});
+        } else if (op == op::Else) {
             const HFrame &f = frames.back();
             h = f.entry + f.params;
             ty.resize(f.entry, 0);
             ty.insert(ty.end(), f.paramTy.begin(), f.paramTy.end());
-        } else if (op == 0x07 || op == 0x19) {
+        } else if (op == op::Catch || op == op::CatchAll) {
             h = frames.back().entry;
             ty.resize(h);
-        } else if (op == 0x0B || op == 0x18) {
+        } else if (op == op::End || op == op::Delegate) {
             HFrame f = frames.size() > 1 ? frames.back() : frames.front();
             if (frames.size() > 1)
                 frames.pop_back();
@@ -228,19 +229,19 @@ void heights(const Module &m, FunctionAnalysis &fa) {
             ty.resize(f.entry, 0);
             ty.insert(ty.end(), f.resTy.begin(), f.resTy.end());
             fa.heights[slot] = static_cast<uint32_t>(h);
-        } else if (op == 0x0C || op == 0x0D || op == 0xD5 || op == 0xD6) {
+        } else if (op == op::Br || op == op::BrIf || op == op::BrOnNull || op == op::BrOnNonNull) {
             // br_on_null carries the values below the reference, br_on_non_null the reference too
-            const int top = op == 0xD5 ? h - 1 : (op == 0x0D ? h - 1 : h);
+            const int top = op == op::BrOnNull || op == op::BrIf ? h - 1 : h;
             if (const HFrame *f = frameAt(static_cast<uint64_t>(ins.imm0))) {
                 auto mv = branchMoves(*f, std::max(top, 0));
                 if (!mv.empty())
                     fa.moves[addr] = std::move(mv);
             }
-            if (op == 0x0D || op == 0xD6) {
+            if (op == op::BrIf || op == op::BrOnNonNull) {
                 h = std::max(h - 1, 0);
                 ty.resize(h);
             }
-        } else if (op == 0x0E) {
+        } else if (op == op::BrTable) {
             h = std::max(h - 1, 0);
             ty.resize(h);
             const auto labels = tableLabels(data, addr);
@@ -254,7 +255,7 @@ void heights(const Module &m, FunctionAnalysis &fa) {
             }
             if (any)
                 fa.tableMoves[addr] = std::move(all);
-        } else if (op == 0x1B || op == 0x1C) {
+        } else if (op == op::Select || op == op::SelectT) {
             const bool vec = h >= 3 && ty[h - 3];
             if (vec)
                 fa.vecOps.insert(addr);
@@ -262,10 +263,10 @@ void heights(const Module &m, FunctionAnalysis &fa) {
             ty.resize(h);
             ty.push_back(vec);
             ++h;
-        } else if (op == 0x20) {
+        } else if (op == op::LocalGet) {
             ty.push_back(vecLocal(ins.imm0));
             ++h;
-        } else if (op == 0x22) {
+        } else if (op == op::LocalTee) {
         } else {
             const Effect e = effectOf(m, ins);
             h = std::max(h - e.pops, 0);
@@ -274,9 +275,10 @@ void heights(const Module &m, FunctionAnalysis &fa) {
                 if (const auto s = simdSig(op & 0xFF))
                     for (char c : s->pushes)
                         ty.push_back(c == 'v');
-            } else if (op == 0x10 || op == 0x12) {
+            } else if (op == op::Call || op == op::ReturnCall) {
                 pushResults(m.funcSig(static_cast<uint32_t>(ins.imm0)));
-            } else if (op == 0x11 || op == 0x13 || op == 0x14 || op == 0x15) {
+            } else if (op == op::CallIndirect || op == op::ReturnCallIndirect || op == op::CallRef ||
+                       op == op::ReturnCallRef) {
                 pushResults(m.sig(static_cast<uint32_t>(ins.imm0)));
             }
             h += e.pushes;
@@ -326,7 +328,7 @@ void spDeltas(const Module &m, FunctionAnalysis &fa) {
                 fa.fallAdj[prev] = it->second - cur;
             cur = it->second;
             dead = false;
-        } else if (op == 0x03) {
+        } else if (op == op::Loop) {
             label.emplace(addr, cur);
         }
 
@@ -334,22 +336,22 @@ void spDeltas(const Module &m, FunctionAnalysis &fa) {
         if (const auto b = fa.branch.find(addr); b != fa.branch.end())
             target = &b->second;
 
-        if (op == 0x04) {
+        if (op == op::If) {
             pop();
             if (target && *target != kFunctionEnd)
                 label.emplace(*target, cur);
-        } else if (op == 0x0D) {
+        } else if (op == op::BrIf) {
             pop();
             if (target)
                 edge(addr, *target);
-        } else if (op == 0x0C) {
+        } else if (op == op::Br) {
             if (target)
                 edge(addr, *target);
             dead = true;
-        } else if (op == 0xD5 || op == 0xD6) {
+        } else if (op == op::BrOnNull || op == op::BrOnNonNull) {
             if (target)
                 edge(addr, *target);
-        } else if (op == 0x0E) {
+        } else if (op == op::BrTable) {
             if (const auto t = fa.tables.find(addr); t != fa.tables.end()) {
                 std::vector<int64_t> adj(t->second.size(), 0);
                 bool any = false;
@@ -365,25 +367,26 @@ void spDeltas(const Module &m, FunctionAnalysis &fa) {
                     fa.tableAdj[addr] = std::move(adj);
             }
             dead = true;
-        } else if (op == 0x00 || op == 0x0F || op == 0x12 || op == 0x13 || op == 0x15 || op == 0x08 || op == 0x09 ||
-                   op == 0x0A) {
+        } else if (op == op::Unreachable || op == op::Return || op == op::ReturnCall ||
+                   op == op::ReturnCallIndirect || op == op::ReturnCallRef || op == op::Throw ||
+                   op == op::Rethrow || op == op::ThrowRef) {
             dead = true;
-        } else if (op == 0x1F) {
+        } else if (op == op::TryTable) {
             if (const auto c = fa.catches.find(addr); c != fa.catches.end())
                 for (const CatchClause &cl : c->second)
                     if (cl.target != kUnresolved && cl.target != kFunctionEnd)
                         label.emplace(cl.target, cur);
-        } else if (op == 0x20) {
+        } else if (op == op::LocalGet) {
             st.push_back(static_cast<size_t>(ins.imm0) < loc.size() ? loc[ins.imm0] : Val{});
-        } else if (op == 0x21 || op == 0x22) {
+        } else if (op == op::LocalSet || op == op::LocalTee) {
             const Val v = pop();
             if (static_cast<size_t>(ins.imm0) < loc.size())
                 loc[ins.imm0] = v;
-            if (op == 0x22)
+            if (op == op::LocalTee)
                 st.push_back(v);
-        } else if (op == 0x23) {
+        } else if (op == op::GlobalGet) {
             st.push_back(ins.imm0 == 0 ? Val{Val::Sp, cur} : Val{});
-        } else if (op == 0x24) {
+        } else if (op == op::GlobalSet) {
             const Val v = pop();
             if (ins.imm0 == 0 && v.kind == Val::Sp) {
                 fa.setAdj[addr] = v.v - cur;
@@ -391,17 +394,18 @@ void spDeltas(const Module &m, FunctionAnalysis &fa) {
             } else if (ins.imm0 == 0) {
                 ++fa.unknownSets;
             }
-        } else if (op == 0x41) {
+        } else if (op == op::I32Const) {
             st.push_back({Val::Const, static_cast<int32_t>(ins.imm0)});
-        } else if (op == 0x6A || op == 0x6B) {
+        } else if (op == op::I32Add || op == op::I32Sub) {
             const Val b = pop(), a = pop();
             Val r;
             if (a.kind == Val::Sp && b.kind == Val::Const)
-                r = {Val::Sp, op == 0x6A ? a.v + b.v : a.v - b.v};
-            else if (op == 0x6A && a.kind == Val::Const && b.kind == Val::Sp)
+                r = {Val::Sp, op == op::I32Add ? a.v + b.v : a.v - b.v};
+            else if (op == op::I32Add && a.kind == Val::Const && b.kind == Val::Sp)
                 r = {Val::Sp, a.v + b.v};
             st.push_back(r);
-        } else if (op >= 0x10 && !isBlock(op) && op != 0x05 && op != 0x0B && op != 0x18 && op != 0x19 && op != 0x07) {
+        } else if (op >= op::Call && !isBlock(op) && op != op::Else && op != op::End && op != op::Delegate &&
+                   op != op::CatchAll && op != op::Catch) {
             const Effect e = effectOf(m, ins);
             for (int k = 0; k < e.pops; ++k)
                 pop();
@@ -409,7 +413,8 @@ void spDeltas(const Module &m, FunctionAnalysis &fa) {
                 st.push_back({});
         }
 
-        if (target && op != 0x04 && op != 0x0D && op != 0x0C && op != 0x0E && op != 0xD5 && op != 0xD6) {
+        if (target && op != op::If && op != op::BrIf && op != op::Br && op != op::BrTable && op != op::BrOnNull &&
+            op != op::BrOnNonNull) {
             // else-terminating jump and function-final end
             edge(addr, *target);
             dead = true;

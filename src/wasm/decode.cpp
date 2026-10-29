@@ -82,9 +82,11 @@ static Operand memarg(Reader &r, Instr &out, bool full) {
 
 static bool hasIdx1(uint8_t op) {
     switch (op) {
-    case 0x08: case 0x09: case 0x0C: case 0x0D: case 0x10: case 0x12: case 0x14: case 0x15: case 0x18:
-    case 0x07: case 0x20: case 0x21: case 0x22: case 0x23: case 0x24: case 0x25: case 0x26: case 0xD2:
-    case 0xD5: case 0xD6: case 0x3F: case 0x40:
+    case op::Throw: case op::Rethrow: case op::Br: case op::BrIf: case op::Call: case op::ReturnCall:
+    case op::CallRef: case op::ReturnCallRef: case op::Delegate: case op::Catch: case op::LocalGet:
+    case op::LocalSet: case op::LocalTee: case op::GlobalGet: case op::GlobalSet: case op::TableGet:
+    case op::TableSet: case op::RefFunc: case op::BrOnNull: case op::BrOnNonNull: case op::MemorySize:
+    case op::MemoryGrow:
         return true;
     default:
         return false;
@@ -103,7 +105,7 @@ Instr decode(std::span<const uint8_t> data, size_t pos, bool full) {
         if (full && v != -64)
             out.ops.push_back({Operand::Text, 0, v >= 0 ? std::format("(type {})", v)
                                                           : std::format("(result {})", valtypeName(v & 0x7F))});
-        if (op == 0x1F) {
+        if (op == op::TryTable) {
             const uint64_t cnt = r.uleb();
             for (uint64_t i = 0; i < cnt; ++i) {
                 CatchSpec c{r.u8(), 0, 0};
@@ -122,8 +124,8 @@ Instr decode(std::span<const uint8_t> data, size_t pos, bool full) {
         const uint64_t v = r.uleb();
         out.imm0 = static_cast<int64_t>(v);
         if (full)
-            out.ops.push_back({op == 0x10 || op == 0x12 ? Operand::Func : Operand::Num, static_cast<int64_t>(v), {}});
-    } else if (op == 0x0E) {
+            out.ops.push_back({op == op::Call || op == op::ReturnCall ? Operand::Func : Operand::Num, static_cast<int64_t>(v), {}});
+    } else if (op == op::BrTable) {
         const uint64_t cnt = r.uleb();
         out.imm0 = static_cast<int64_t>(cnt);
         std::string text = "[";
@@ -138,26 +140,26 @@ Instr decode(std::span<const uint8_t> data, size_t pos, bool full) {
             out.ops.push_back({Operand::Text, 0, text + "]"});
             out.ops.push_back({Operand::Num, static_cast<int64_t>(def), {}});
         }
-    } else if (op == 0x11 || op == 0x13) {
+    } else if (op == op::CallIndirect || op == op::ReturnCallIndirect) {
         out.imm0 = static_cast<int64_t>(r.uleb());
         out.imm1 = static_cast<int64_t>(r.uleb());
         if (full) {
             out.ops.push_back({Operand::Num, out.imm0, {}});
             out.ops.push_back({Operand::Num, out.imm1, {}});
         }
-    } else if (op == 0x1C) {
+    } else if (op == op::SelectT) {
         const uint64_t cnt = r.uleb();
         for (uint64_t i = 0; i < cnt; ++i)
             r.valtype();
-    } else if (op >= 0x28 && op <= 0x3E) {
+    } else if (op >= op::LoadFirst && op <= op::StoreLast) {
         Operand m = memarg(r, out, full);
         if (full)
             out.ops.push_back(std::move(m));
-    } else if (op == 0x41 || op == 0x42) {
+    } else if (op == op::I32Const || op == op::I64Const) {
         out.imm0 = r.sleb();
         if (full)
             out.ops.push_back({Operand::Imm, out.imm0, {}});
-    } else if (op == 0x43) {
+    } else if (op == op::F32Const) {
         uint32_t bits = 0;
         for (int i = 0; i < 4; ++i)
             bits |= static_cast<uint32_t>(r.u8()) << (8 * i);
@@ -167,7 +169,7 @@ Instr decode(std::span<const uint8_t> data, size_t pos, bool full) {
             std::memcpy(&f, &bits, 4);
             out.ops.push_back({Operand::Text, 0, std::format("{}", f)});
         }
-    } else if (op == 0x44) {
+    } else if (op == op::F64Const) {
         uint64_t bits = 0;
         for (int i = 0; i < 8; ++i)
             bits |= static_cast<uint64_t>(r.u8()) << (8 * i);
@@ -177,9 +179,9 @@ Instr decode(std::span<const uint8_t> data, size_t pos, bool full) {
             std::memcpy(&d, &bits, 8);
             out.ops.push_back({Operand::Text, 0, std::format("{}", d)});
         }
-    } else if (op == 0xD0) {
+    } else if (op == op::RefNull) {
         r.sleb();
-    } else if (op == 0xFC) {
+    } else if (op == kPrefixFC >> 8) {
         const uint64_t sub = r.uleb();
         if (sub > 17)
             throw DecodeError("unknown 0xFC sub opcode");
@@ -193,7 +195,7 @@ Instr decode(std::span<const uint8_t> data, size_t pos, bool full) {
                 out.ops.push_back({Operand::Num, static_cast<int64_t>(v), {}});
         }
         out.op = kPrefixFC | static_cast<uint32_t>(sub);
-    } else if (op == 0xFD) {
+    } else if (op == kPrefixFD >> 8) {
         const uint64_t sub = r.uleb();
         if (sub <= 11 || sub == 0x5C || sub == 0x5D || (sub >= 0x54 && sub <= 0x5B)) {
             Operand m = memarg(r, out, full);
@@ -215,7 +217,7 @@ Instr decode(std::span<const uint8_t> data, size_t pos, bool full) {
                 out.ops.push_back({Operand::Num, out.imm1, {}});
         }
         out.op = kPrefixFD | static_cast<uint32_t>(sub);
-    } else if (op == 0xFE) {
+    } else if (op == kPrefixFE >> 8) {
         const uint64_t sub = r.uleb();
         if (sub == 3) {
             r.u8();

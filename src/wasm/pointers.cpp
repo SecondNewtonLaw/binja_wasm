@@ -15,8 +15,6 @@ namespace wasm {
 
 namespace {
 
-constexpr uint8_t kI32 = 0x7F;
-
 struct Graph {
     std::vector<uint32_t> paramBase;  // node id of each function's first param
     uint32_t retBase = 0;             // node id of function 0's result
@@ -64,30 +62,30 @@ void scan(const Module &m, Graph &g, uint32_t f) {
         const uint32_t op = ins.op;
         st.resize(fa->heights[i], kNone);
 
-        if (op >= 0x28 && op <= 0x35) {
+        if (op >= op::LoadFirst && op <= op::LoadLast) {
             use(pop());
             st.push_back(kNone);
-        } else if (op >= 0x36 && op <= 0x3E) {
+        } else if (op >= op::StoreFirst && op <= op::StoreLast) {
             pop();
             use(pop());
-        } else if (op == 0xFD00) {
+        } else if (op == op::V128Load) {
             use(pop());
             st.push_back(kNone);
-        } else if (op == 0xFD0B) {
+        } else if (op == op::V128Store) {
             pop();
             use(pop());
-        } else if (op == 0x20) {
+        } else if (op == op::LocalGet) {
             st.push_back(static_cast<size_t>(ins.imm0) < loc.size() ? loc[ins.imm0] : kNone);
-        } else if (op == 0x21 || op == 0x22) {
+        } else if (op == op::LocalSet || op == op::LocalTee) {
             const int32_t v = pop();
             if (static_cast<size_t>(ins.imm0) < loc.size())
                 loc[ins.imm0] = v;
-            if (op == 0x22)
+            if (op == op::LocalTee)
                 st.push_back(v);
-        } else if (op == 0x6A || op == 0x6B) {
+        } else if (op == op::I32Add || op == op::I32Sub) {
             const int32_t b = pop(), a = pop();
-            st.push_back(a >= 0 ? a : (op == 0x6A ? b : kNone));
-        } else if (op == 0x10 || op == 0x12) {
+            st.push_back(a >= 0 ? a : (op == op::I32Add ? b : kNone));
+        } else if (op == op::Call || op == op::ReturnCall) {
             const auto callee = static_cast<uint32_t>(ins.imm0);
             const FuncType *cs = m.funcSig(callee);
             if (cs) {
@@ -100,25 +98,25 @@ void scan(const Module &m, Graph &g, uint32_t f) {
                 for (size_t k = 0; k < cs->results.size(); ++k)
                     st.push_back(k == 0 && cs->results[0] == kI32 ? static_cast<int32_t>(g.ret(callee)) : kNone);
             }
-            if (op == 0x12 && retI32 && !st.empty())
+            if (op == op::ReturnCall && retI32 && !st.empty())
                 flow(st.back(), g.ret(f));
-        } else if (op == 0x0F) {
+        } else if (op == op::Return) {
             if (retI32 && !st.empty())
                 flow(st.back(), g.ret(f));
-        } else if (op == 0x0B) {
+        } else if (op == op::End) {
             const auto b = fa->branch.find(addr);
             if (b != fa->branch.end() && b->second == kFunctionEnd && retI32 && !st.empty())
                 flow(st.back(), g.ret(f));
-        } else if (op == 0x04 || op == 0x0D || op == 0x0E) {
+        } else if (op == op::If || op == op::BrIf || op == op::BrTable) {
             pop();
-        } else if (op >= 0x10 && !isBlock(op) && op != 0x05 && op != 0x07 && op != 0x18 && op != 0x19 &&
-                   op != 0x11 && op != 0x13) {
+        } else if (op >= op::Call && !isBlock(op) && op != op::Else && op != op::Catch && op != op::Delegate &&
+                   op != op::CatchAll && op != op::CallIndirect && op != op::ReturnCallIndirect) {
             const Effect e = fixedEffect(op).value_or(Effect{0, 0});
             for (int k = 0; k < e.pops; ++k)
                 pop();
             for (int k = 0; k < e.pushes; ++k)
                 st.push_back(kNone);
-        } else if (op == 0x11 || op == 0x13) {
+        } else if (op == op::CallIndirect || op == op::ReturnCallIndirect) {
             const FuncType *cs = m.sig(static_cast<uint32_t>(ins.imm0));
             pop();
             if (cs) {
