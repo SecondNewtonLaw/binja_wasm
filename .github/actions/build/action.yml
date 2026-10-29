@@ -1,0 +1,67 @@
+name: build-plugin
+description: Build and test binja_wasm against one binaryninja-api ref and zip the DLL.
+inputs:
+  ref:
+    description: binaryninja-api tag or commit
+    required: true
+  label:
+    description: Version label used in cache keys and the zip name
+    required: true
+runs:
+  using: composite
+  steps:
+    - run: git config --system core.longpaths true
+      shell: pwsh
+    - uses: ilammy/msvc-dev-cmd@v1
+    - run: choco install ccache -y --no-progress
+      shell: pwsh
+    - uses: actions/cache/restore@v4
+      with:
+        path: C:/cpm
+        key: cpm-${{ inputs.ref }}-${{ hashFiles('CMakeLists.txt', 'cmake/CPM.cmake') }}-${{ github.run_id }}-${{ github.run_attempt }}
+        restore-keys: |
+          cpm-${{ inputs.ref }}-${{ hashFiles('CMakeLists.txt', 'cmake/CPM.cmake') }}-
+          cpm-${{ inputs.ref }}-
+    - uses: actions/cache/restore@v4
+      with:
+        path: C:/ccache
+        key: ccache-${{ inputs.label }}-${{ github.run_id }}-${{ github.run_attempt }}
+        restore-keys: |
+          ccache-${{ inputs.label }}-
+          ccache-
+    - name: Configure
+      shell: pwsh
+      run: >
+        cmake --preset release
+        -DBN_INSTALL_DIR=
+        -DBN_ALLOW_STUBS=ON
+        -DBN_API_REVISION="${{ inputs.ref }}"
+        -DBN_USER_PLUGINS_DIR="${{ runner.temp }}/plugins"
+    - name: Build
+      shell: pwsh
+      run: cmake --build --preset release
+    - name: Compiler cache statistics
+      if: always()
+      shell: pwsh
+      run: ccache --show-stats
+    - name: Save CPM sources
+      if: always()
+      uses: actions/cache/save@v4
+      with:
+        path: C:/cpm
+        key: cpm-${{ inputs.ref }}-${{ hashFiles('CMakeLists.txt', 'cmake/CPM.cmake') }}-${{ github.run_id }}-${{ github.run_attempt }}
+    - name: Save compiler cache
+      if: always()
+      uses: actions/cache/save@v4
+      with:
+        path: C:/ccache
+        key: ccache-${{ inputs.label }}-${{ github.run_id }}-${{ github.run_attempt }}
+    - name: Test
+      shell: pwsh
+      run: ctest --test-dir cmake-build-release --output-on-failure
+    - name: Package
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Force dist | Out-Null
+        Copy-Item cmake-build-release/binja_wasm.dll dist/
+        Compress-Archive -Path dist/binja_wasm.dll -DestinationPath "binja_wasm-bn${{ inputs.label }}-win64.zip"

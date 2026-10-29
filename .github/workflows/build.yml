@@ -49,58 +49,11 @@ jobs:
         include: ${{ fromJSON(needs.plan.outputs.matrix) }}
     name: build (BN ${{ matrix.label }})
     steps:
-      - run: git config --system core.longpaths true
       - uses: actions/checkout@v4
-      - uses: ilammy/msvc-dev-cmd@v1
-      - run: choco install ccache -y --no-progress
-      - uses: actions/cache/restore@v4
+      - uses: ./.github/actions/build
         with:
-          path: C:/cpm
-          key: cpm-${{ matrix.ref }}-${{ hashFiles('CMakeLists.txt', 'cmake/CPM.cmake') }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            cpm-${{ matrix.ref }}-${{ hashFiles('CMakeLists.txt', 'cmake/CPM.cmake') }}-
-            cpm-${{ matrix.ref }}-
-      - uses: actions/cache/restore@v4
-        with:
-          path: C:/ccache
-          key: ccache-${{ matrix.label }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            ccache-${{ matrix.label }}-
-            ccache-
-      - name: Configure
-        shell: pwsh
-        run: >
-          cmake --preset release
-          -DBN_INSTALL_DIR=
-          -DBN_ALLOW_STUBS=ON
-          -DBN_API_REVISION="${{ matrix.ref }}"
-          -DBN_USER_PLUGINS_DIR="${{ runner.temp }}/plugins"
-      - name: Build
-        run: cmake --build --preset release
-      - name: Compiler cache statistics
-        if: always()
-        run: ccache --show-stats
-      - name: Save CPM sources
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: C:/cpm
-          key: cpm-${{ matrix.ref }}-${{ hashFiles('CMakeLists.txt', 'cmake/CPM.cmake') }}-${{ github.run_id }}-${{ github.run_attempt }}
-      - name: Save compiler cache
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: C:/ccache
-          key: ccache-${{ matrix.label }}-${{ github.run_id }}-${{ github.run_attempt }}
-      - name: Test
-        run: ctest --test-dir cmake-build-release --output-on-failure
-      - name: Package
-        shell: pwsh
-        run: |
-          $name = "binja_wasm-bn${{ matrix.label }}-win64"
-          New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item cmake-build-release/binja_wasm.dll dist/
-          Compress-Archive -Path dist/binja_wasm.dll -DestinationPath "$name.zip"
+          ref: ${{ matrix.ref }}
+          label: ${{ matrix.label }}
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.tag }}-${{ matrix.label }}

@@ -1,0 +1,93 @@
+name: marketplace
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "plugin.json version to release (empty = bump patch)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: marketplace
+  cancel-in-progress: false
+
+env:
+  LLVM_ROOT: C:/Program Files/LLVM
+  CPM_SOURCE_CACHE: C:/cpm
+  CCACHE_DIR: C:/ccache
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MIN_BN: ${{ vars.MIN_BN || '5.0' }}
+        run: bash .github/scripts/plan.sh minors
+
+  build:
+    needs: plan
+    runs-on: windows-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    name: build (BN ${{ matrix.label }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/build
+        with:
+          ref: ${{ matrix.ref }}
+          label: ${{ matrix.label }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mm-${{ matrix.mm }}
+          path: cmake-build-release/binja_wasm.dll
+          if-no-files-found: error
+
+  release:
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Stage binaries and bump version
+        id: ver
+        env:
+          MATRIX: ${{ needs.plan.outputs.matrix }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          rm -rf bin
+          for mm in $(jq -r '.[].mm' <<<"$MATRIX"); do
+            mkdir -p "bin/$mm"
+            cp "artifacts/mm-$mm/binja_wasm.dll" "bin/$mm/"
+          done
+          cur=$(jq -r .version plugin.json)
+          new=${INPUT_VERSION:-$(awk -F. '{printf "%d.%d.%d", $1, $2, $3+1}' <<<"$cur")}
+          jq --arg v "$new" '.version = $v' plugin.json > plugin.json.tmp && mv plugin.json.tmp plugin.json
+          echo "version=$new" >> "$GITHUB_OUTPUT"
+      - name: Commit, tag and release
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f bin plugin.json
+          git commit -m "Release $VERSION"
+          git tag "v$VERSION"
+          git push origin HEAD "v$VERSION"
+          gh release create "v$VERSION" --title "v$VERSION" --generate-notes

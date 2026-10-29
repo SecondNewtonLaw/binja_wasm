@@ -2,6 +2,7 @@
 # Emits a GitHub Actions build matrix of Binary Ninja API refs to build.
 #   plan.sh ci       latest stable + dev head (always)
 #   plan.sh release  stable tags and dev head not yet released here
+#   plan.sh minors   latest stable tag of each major.minor (marketplace)
 # Env: GH_TOKEN, GITHUB_REPOSITORY, MIN_BN (default 5.0), GITHUB_OUTPUT
 set -euo pipefail
 
@@ -18,7 +19,18 @@ stable=$(gh api --paginate "repos/$api/git/matching-refs/tags/stable/" --jq '.[]
 released=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName --jq '.[].tagName' || true)
 
 entries=()
-add() { entries+=("$(jq -nc --arg l "$1" --arg r "$2" --arg t "$3" --arg k "$4" '{label:$l,ref:$r,tag:$t,kind:$k}')"); }
+add() { entries+=("$(jq -nc --arg l "$1" --arg r "$2" --arg t "$3" --arg k "$4" '{label:$l,ref:$r,tag:$t,kind:$k,mm:($l|split(".")[0:2]|join("."))}')"); }
+
+if [ "$mode" = minors ]; then
+  for v in $(echo "$stable" | awk -F. '{last[$1"."$2]=$0} END{for(k in last) print last[k]}' | sort -V); do
+    add "$v" "stable/$v" "bn-$v" stable
+  done
+  matrix=$(printf '%s\n' "${entries[@]:-}" | jq -sc 'map(select(. != null))')
+  echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+  echo "count=$(jq length <<<"$matrix")" >> "$GITHUB_OUTPUT"
+  echo "$matrix"
+  exit 0
+fi
 
 if [ "$mode" = ci ]; then
   v=$(echo "$stable" | tail -1)
