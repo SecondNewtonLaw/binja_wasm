@@ -95,6 +95,7 @@ struct Fingerprint {
         };
         map(12, fa.tableAdj, adjVec);
         map(13, fa.catchAdj, adjVec);
+        map(14, fa.elseSkip, [](uint64_t h, uint64_t v) { return mix(h, v); });
     }
 };
 

@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <format>
 #include <map>
@@ -33,13 +35,89 @@ ptrdiff_t Module::startIndex(uint64_t addr) const {
     return (it - starts.begin()) - 1;
 }
 
-static void limits(Reader &r) {
+static uint64_t limits(Reader &r) {
     const uint8_t flag = r.u8();
-    r.uleb();
+    const uint64_t min = r.uleb();
     if (flag & 1)
         r.uleb();
     if (flag & 8)
         r.uleb();
+    return min;
+}
+
+// Reads a constant expression for a global initializer.  The value is the raw
+// bit pattern; expressions that refer to another global copy that global's
+// initializer when it is already known.
+static uint64_t globalInit(Reader &r, const std::vector<uint64_t> &known) {
+    const uint8_t initOp = r.u8();
+    uint64_t value = 0;
+    switch (initOp) {
+    case op::I32Const:
+        value = static_cast<uint32_t>(r.sleb());
+        break;
+    case op::I64Const:
+        value = static_cast<uint64_t>(r.sleb());
+        break;
+    case op::F32Const: {
+        uint32_t bits = 0;
+        for (int i = 0; i < 4; ++i)
+            bits |= static_cast<uint32_t>(r.u8()) << (8 * i);
+        value = bits;
+        break;
+    }
+    case op::F64Const: {
+        uint64_t bits = 0;
+        for (int i = 0; i < 8; ++i)
+            bits |= static_cast<uint64_t>(r.u8()) << (8 * i);
+        value = bits;
+        break;
+    }
+    case op::RefNull:
+        r.sleb();  // heap type
+        break;
+    case op::RefFunc:
+        r.uleb();
+        break;
+    case op::GlobalGet: {
+        const uint64_t idx = r.uleb();
+        value = idx < known.size() ? known[idx] : 0;
+        break;
+    }
+    default:
+        throw DecodeError(std::format("unsupported global initializer {:#x}", initOp));
+    }
+    if (r.u8() != op::End)
+        throw DecodeError("global initializer missing end");
+    return value;
+}
+
+// Reads a constant expression used by element/data offsets.  Returns the value
+// when it is a simple integer constant (the common case), otherwise nullopt.
+static std::optional<uint64_t> constOffset(Reader &r) {
+    const uint8_t initOp = r.u8();
+    std::optional<uint64_t> value;
+    switch (initOp) {
+    case op::I32Const:
+        value = static_cast<uint32_t>(r.sleb());
+        break;
+    case op::I64Const:
+        value = static_cast<uint64_t>(r.sleb());
+        break;
+    case op::GlobalGet:
+        r.uleb();
+        break;
+    case op::RefNull:
+        r.sleb();
+        break;
+    case op::RefFunc:
+        r.uleb();
+        break;
+    default:
+        throw DecodeError(std::format("unsupported const expression {:#x}", initOp));
+    }
+    if (r.u8() != op::End)
+        throw DecodeError("const expression missing end");
+    return value;
 }
 
 static std::optional<Module> parse(std::vector<uint8_t> bytes) {
@@ -101,11 +179,43 @@ static std::optional<Module> parse(std::vector<uint8_t> bytes) {
                     importedTypes.push_back(static_cast<uint32_t>(r.uleb()));
                     break;
                 case 1: r.valtype(); limits(r); break;
-                case 2: limits(r); break;
-                case 3: r.valtype(); r.u8(); break;
+                case 2: m.memoryPages = std::max<uint64_t>(m.memoryPages, limits(r)); break;
+                case 3: {
+                    const uint8_t t = r.valtype();
+                    r.u8();  // mutability
+                    m.globalTypes.push_back(t);
+                    m.globalInits.push_back(0);
+                    break;
+                }
                 case 4: r.u8(); r.uleb(); break;
                 default: throw DecodeError(std::format("unknown import kind {}", kind));
                 }
+            }
+            break;
+        }
+        case 4: {
+            const uint64_t cnt = r.uleb();
+            for (uint64_t i = 0; i < cnt; ++i) {
+                r.valtype();  // reftype
+                const uint64_t min = limits(r);
+                if (m.table.empty())
+                    m.table.assign(min, kNoFunc);
+            }
+            break;
+        }
+        case 5: {
+            const uint64_t cnt = r.uleb();
+            for (uint64_t i = 0; i < cnt; ++i)
+                m.memoryPages = std::max<uint64_t>(m.memoryPages, limits(r));
+            break;
+        }
+        case 6: {
+            const uint64_t cnt = r.uleb();
+            for (uint64_t i = 0; i < cnt; ++i) {
+                const uint8_t t = r.valtype();
+                r.u8();  // mutability
+                m.globalTypes.push_back(t);
+                m.globalInits.push_back(globalInit(r, m.globalInits));
             }
             break;
         }
@@ -125,6 +235,28 @@ static std::optional<Module> parse(std::vector<uint8_t> bytes) {
         case 8:
             m.entries.push_back(static_cast<uint32_t>(r.uleb()));
             break;
+        case 9: {
+            const uint64_t cnt = r.uleb();
+            for (uint64_t i = 0; i < cnt; ++i) {
+                const uint64_t flags = r.uleb();
+                if (flags != 0 && flags != 2)
+                    break;  // passive/declarative segments are not modelled
+                const uint64_t tableIdx = flags == 2 ? r.uleb() : 0;
+                const auto offset = constOffset(r);
+                const uint64_t n = r.uleb();
+                if (tableIdx != 0 || !offset) {
+                    for (uint64_t k = 0; k < n; ++k)
+                        r.uleb();
+                    continue;
+                }
+                const uint64_t base = *offset;
+                if (base + n > m.table.size())
+                    m.table.resize(base + n, kNoFunc);
+                for (uint64_t k = 0; k < n; ++k)
+                    m.table[base + k] = static_cast<uint32_t>(r.uleb());
+            }
+            break;
+        }
         case 10: {
             const uint64_t cnt = r.uleb();
             for (uint64_t j = 0; j < cnt; ++j) {
@@ -228,7 +360,13 @@ std::optional<Module> parseModule(std::vector<uint8_t> data) {
         return std::nullopt;
     try {
         return parse(std::move(data));
-    } catch (const DecodeError &) {
+    } catch (const DecodeError &e) {
+        if (std::getenv("WASM_PARSE_DEBUG"))
+            std::fprintf(stderr, "wasm parse: %s\n", e.what());
+        return std::nullopt;
+    } catch (const std::exception &e) {
+        if (std::getenv("WASM_PARSE_DEBUG"))
+            std::fprintf(stderr, "wasm parse: %s\n", e.what());
         return std::nullopt;
     }
 }

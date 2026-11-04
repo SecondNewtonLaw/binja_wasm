@@ -1,0 +1,129 @@
+=== add @4f ===
+loc_c000004f:
+  ld0 = low.u32(a0)
+  ld1 = low.u32(a1)
+  sd0 = ld0
+loc_c0000051:
+  sd1 = ld1
+loc_c0000053:
+  sd0 = (sd0 + sd1)
+loc_c0000054:
+  r0 = s0
+  return ptr(0)
+
+=== factorial @57 ===
+loc_c0000057:
+  ld0 = low.u32(a0)
+  sd0 = ld0
+loc_c0000059:
+  sd0 = bool_to_int((sd0 == 0))
+loc_c000005a:
+  if ((sd0 != 0)) goto loc_c000005c else loc_c000005e
+loc_c000005c:
+  sd0 = 1
+  goto loc_c000006a
+loc_c000005e:
+loc_c000005f:
+  sd0 = ld0
+loc_c0000061:
+  sd1 = ld0
+loc_c0000063:
+  sd2 = 1
+loc_c0000065:
+  sd1 = (sd1 - sd2)
+loc_c0000066:
+  a0 = s1
+  call(ptr(0xc0000057))
+  s1 = r0
+loc_c0000068:
+  sd0 = (sd0 * sd1)
+loc_c0000069:
+loc_c000006a:
+  r0 = s0
+  return ptr(0)
+
+=== memory @6d ===
+loc_c000006d:
+  ld0 = low.u32(a0)
+  sd0 = ld0
+loc_c000006f:
+  sd1 = ld0
+loc_c0000071:
+  sd1 = load.u32((sd1 + 4))
+loc_c0000074:
+  store.u32((sd0 + 8), sd1)
+loc_c0000077:
+  sd0 = ld0
+loc_c0000079:
+  sd0 = load.u32((sd0 + 8))
+loc_c000007c:
+  r0 = s0
+  return ptr(0)
+
+=== v128 @7f ===
+loc_c000007f:
+  v0 = (zext.u128(a0) | (zext.u128(ah0) << 64))
+  x0 = v0
+loc_c0000081:
+  r0 = low.u64(x0)
+  rh0 = low.u64((x0 >>u 64))
+  return ptr(0)
+
+=== clz @84 ===
+loc_c0000084:
+  ld0 = low.u32(a0)
+  sd0 = ld0
+loc_c0000086:
+  s0 = __builtin_i32_clz(s0)
+loc_c0000087:
+  r0 = s0
+  return ptr(0)
+
+=== branch @8a ===
+loc_c000008a:
+  ld0 = low.u32(a0)
+loc_c000008c:
+  sd0 = 7
+loc_c000008e:
+  sd1 = ld0
+loc_c0000090:
+  if ((sd1 != 0)) goto loc_c0000095 else loc_c0000092
+loc_c0000092:
+loc_c0000093:
+  sd0 = 9
+loc_c0000095:
+loc_c0000096:
+  r0 = s0
+  return ptr(0)
+
+=== float @99 ===
+loc_c0000099:
+  sd0 = f32(1.5)
+loc_c000009e:
+  r0 = s0
+  return ptr(0)
+
+=== simd_add @a1 ===
+loc_c00000a1:
+  v0 = (zext.u128(a0) | (zext.u128(ah0) << 64))
+  v1 = (zext.u128(a1) | (zext.u128(ah1) << 64))
+  x0 = v0
+loc_c00000a3:
+  x1 = v1
+loc_c00000a5:
+  x0 = __builtin_i32x4_add(x0, x1)
+loc_c00000a8:
+  r0 = low.u64(x0)
+  rh0 = low.u64((x0 >>u 64))
+  return ptr(0)
+
+=== simd_lane @ab ===
+loc_c00000ab:
+  v0 = (zext.u128(a0) | (zext.u128(ah0) << 64))
+  x0 = v0
+loc_c00000ad:
+  s0 = __builtin_i32x4_extract_lane(0, x0)
+loc_c00000b0:
+  r0 = s0
+  return ptr(0)
+

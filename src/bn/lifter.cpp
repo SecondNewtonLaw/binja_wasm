@@ -197,12 +197,27 @@ private:
     }
 
     void intrinsic(uint32_t id, const std::vector<ExprId> &params, uint32_t outs) {
+        if (!outs) {
+            add(il_.Intrinsic({}, id, params));
+            return;
+        }
+        // A one-result intrinsic can write straight into the next stack slot;
+        // otherwise the temporary and the following move double the noise.
+        const bool direct = outs == 1 && static_cast<uint32_t>(h_) < kNStack;
         std::vector<RegisterOrFlag> outputs;
-        for (uint32_t k = 0; k < outs; ++k)
-            outputs.push_back(RegisterOrFlag::Register(temp(8 + k)));
+        if (direct) {
+            outputs.push_back(RegisterOrFlag::Register(regId(Bank::S, h_)));
+        } else {
+            for (uint32_t k = 0; k < outs; ++k)
+                outputs.push_back(RegisterOrFlag::Register(temp(8 + k)));
+        }
         add(il_.Intrinsic(outputs, id, params));
-        for (uint32_t k = 0; k < outs; ++k)
-            push(il_.Register(8, temp(8 + k)));
+        if (direct) {
+            ++h_;
+        } else {
+            for (uint32_t k = 0; k < outs; ++k)
+                push(il_.Register(8, temp(8 + k)));
+        }
     }
 
     void builtin(const Builtin &b, const wasm::Instr &ins) {
@@ -223,6 +238,8 @@ private:
 
     void epilogue() {
         const int nres = sig_ ? static_cast<int>(sig_->results.size()) : 0;
+        if (nres > static_cast<int>(kNResults))
+            add(il_.Unimplemented());
         for (int k = 0; k < std::min<int>(nres, kNResults); ++k) {
             if (sig_->results[k] == wasm::kV128) {
                 const ExprId v = vreg(h_ - nres + k);
@@ -238,6 +255,8 @@ private:
     void call(ExprId dest, const wasm::FuncType *sig) {
         const int nparams = sig ? static_cast<int>(sig->params.size()) : 0;
         const int nresults = sig ? static_cast<int>(sig->results.size()) : 0;
+        if (!sig || nparams > static_cast<int>(kNArgs) || nresults > static_cast<int>(kNResults))
+            add(il_.Unimplemented());
         const int base = std::max(h_ - nparams, 0);
         for (int k = 0; k < std::min<int>(nparams, kNArgs); ++k) {
             if (sig->params[k] == wasm::kV128) {
@@ -320,7 +339,7 @@ private:
                                           {c8(cl.kind), c8(cl.tag), c8(i)}));
                         write(static_cast<int>(cl.entry + i), il_.Register(8, temp(3)));
                     }
-                    if (adj != fa_->catchAdj.end() && k < adj->second.size() && adj->second[k]) {
+                    if (trackSp() && adj != fa_->catchAdj.end() && k < adj->second.size() && adj->second[k]) {
                         const uint32_t g0 = regId(Bank::G, 0);
                         add(il_.SetRegister(4, g0, il_.Add(4, il_.Register(4, g0), c4(static_cast<uint64_t>(adj->second[k])))));
                     }
@@ -334,7 +353,15 @@ private:
             add(il_.NoReturn());
     }
 
+    // Global 0 is the shadow stack pointer in clang-produced modules, but it is
+    // an ordinary global elsewhere.  If the analysis found a global.set 0 that
+    // it could not express as an entry-relative delta, keep the real write
+    // instead of pretending it was a stack adjustment.
+    bool trackSp() const { return !fa_ || fa_->unknownSets == 0; }
+
     void adjustSp(const std::unordered_map<uint64_t, int64_t> &table, uint64_t addr) {
+        if (!trackSp())
+            return;
         const int64_t d = wasm::FunctionAnalysis::lookup(table, addr);
         if (!d)
             return;
@@ -364,7 +391,7 @@ void Lifter::brTable(const wasm::Instr &) {
     const auto leave = [&](size_t k) {
         if (mv != fa_->tableMoves.end() && k < mv->second.size())
             moves(&mv->second[k]);
-        if (adj != fa_->tableAdj.end() && k < adj->second.size() && adj->second[k]) {
+        if (trackSp() && adj != fa_->tableAdj.end() && k < adj->second.size() && adj->second[k]) {
             const uint32_t g0 = regId(Bank::G, 0);
             add(il_.SetRegister(4, g0, il_.Add(4, il_.Register(4, g0), c4(static_cast<uint64_t>(adj->second[k])))));
         }
@@ -403,13 +430,22 @@ void Lifter::localOrGlobal(const wasm::Instr &ins) {
     const auto i = static_cast<uint32_t>(ins.imm0);
     const bool local = op <= op::LocalTee;
     const uint32_t limit = local ? kNLocals : kNGlobals;
-    const size_t width = local ? localSize(i) : (i == 0 ? 4 : 8);
-    const uint32_t regid = local ? regId(width == 4 ? Bank::Ld : Bank::L, i) : regId(Bank::G, i);
+    // Use the parsed global type when available; g0 defaults to i32 because it is
+    // the shadow stack pointer in clang-produced modules.
+    const bool knownGlobal = !local && i < m_.globalTypes.size();
+    const uint8_t gt = knownGlobal ? m_.globalTypes[i] : (i == 0 ? wasm::kI32 : wasm::kI64);
+    const bool gvec = !local && gt == wasm::kV128;
+    const size_t width = local ? localSize(i) : (gt == wasm::kI32 || gt == wasm::kF32 ? 4 : 8);
+    const uint32_t regid = local ? regId(width == 4 ? Bank::Ld : Bank::L, i)
+                                 : (gvec ? regId(Bank::Gv, i) : regId(Bank::G, i));
     const bool vec = local && i < limit && isVecLocal(i);
     const auto &sp = specials();
     if (op == op::LocalGet || op == op::GlobalGet) {
         if (vec) {
             vwrite(h_, il_.Register(16, regId(Bank::Lv, i)));
+            ++h_;
+        } else if (gvec && i < limit) {
+            vwrite(h_, il_.Register(16, regid));
             ++h_;
         } else if (i < limit) {
             push(il_.Register(width, regid), width);
@@ -419,13 +455,15 @@ void Lifter::localOrGlobal(const wasm::Instr &ins) {
         return;
     }
     pop(0);
-    if (op == op::GlobalSet && i == 0 && fa_ && fa_->setAdj.count(addr_)) {
+    if (op == op::GlobalSet && i == 0 && trackSp() && fa_ && fa_->setAdj.count(addr_)) {
         adjustSp(fa_->setAdj, addr_);
-    } else if (op == op::GlobalSet && i == 0 && fa_) {
+    } else if (op == op::GlobalSet && i == 0 && trackSp() && fa_) {
         // dynamic stack pointer (aligned/variable alloca): BN can't track it, keep g0 on the static frame
         add(il_.Nop());
     } else if (vec) {
         add(il_.SetRegister(16, regId(Bank::Lv, i), vreg(v_[0])));
+    } else if (gvec && i < limit) {
+        add(il_.SetRegister(16, regid, vreg(v_[0])));
     } else if (i < limit) {
         add(il_.SetRegister(width, regid, val(0, width)));
     } else {
@@ -486,18 +524,27 @@ void Lifter::simd(const wasm::Instr &ins) {
         params.insert(params.end(), args.rbegin(), args.rend());
         const bool vecOut = !sig->pushes.empty() && sig->pushes[0] == 'v';
         const bool direct = vecOut && static_cast<uint32_t>(h_) < kNStack;
+        const bool scalarOut = !vecOut && sig->pushes.size() == 1;
+        const bool directScalar = scalarOut && static_cast<uint32_t>(h_) < kNStack;
         std::vector<RegisterOrFlag> outputs;
         if (direct)
             outputs.push_back(RegisterOrFlag::Register(regId(Bank::X, h_)));
+        else if (vecOut)
+            outputs.push_back(RegisterOrFlag::Register(regId(Bank::Tv, 0)));
+        else if (directScalar)
+            outputs.push_back(RegisterOrFlag::Register(regId(Bank::S, h_)));
         else if (!sig->pushes.empty())
             outputs.push_back(RegisterOrFlag::Register(temp(8)));
         add(il_.Intrinsic(outputs, simdIntrinsic(sub), params));
         if (vecOut) {
             if (!direct)
-                add(il_.Store(16, spill(h_, 1), il_.Register(8, temp(8))));
+                add(il_.Store(16, spill(h_, 1), il_.Register(16, regId(Bank::Tv, 0))));
             ++h_;
         } else if (!sig->pushes.empty()) {
-            push(il_.Register(8, temp(8)));
+            if (directScalar)
+                ++h_;
+            else
+                push(il_.Register(8, temp(8)));
         }
     }
 }
@@ -647,6 +694,8 @@ void Lifter::run(const wasm::Instr &ins) {
 
     if (const auto it = m_.addrIndex.find(addr_); it != m_.addrIndex.end()) {
         if (const wasm::FuncType *sig = m_.funcSig(it->second)) {
+            if (sig->params.size() > kNArgs || sig->results.size() > kNResults)
+                add(il_.Unimplemented());
             const size_t n = std::min<size_t>({sig->params.size(), kNArgs, kNLocals});
             for (uint32_t i = 0; i < n; ++i) {
                 if (sig->params[i] == wasm::kV128)
@@ -655,6 +704,19 @@ void Lifter::run(const wasm::Instr &ins) {
                     add(il_.SetRegister(4, regId(Bank::Ld, i), il_.LowPart(4, il_.Register(8, regId(Bank::A, i)))));
                 else
                     add(il_.SetRegister(8, regId(Bank::L, i), il_.Register(8, regId(Bank::A, i))));
+            }
+            // WASM locals are zero-initialised.  Only parameters are copied
+            // above, so initialise the declared locals as well.
+            const auto lt = m_.localTypes.find(funcStart_);
+            if (lt != m_.localTypes.end()) {
+                for (size_t i = sig->params.size(); i < lt->second.size() && i < kNLocals; ++i) {
+                    if (lt->second[i] == wasm::kV128)
+                        add(il_.SetRegister(16, regId(Bank::Lv, i), il_.Const(16, 0)));
+                    else if (localSize(static_cast<uint32_t>(i)) == 4)
+                        add(il_.SetRegister(4, regId(Bank::Ld, i), c4(0)));
+                    else
+                        add(il_.SetRegister(8, regId(Bank::L, i), c8(0)));
+                }
             }
         }
     }
@@ -667,7 +729,11 @@ void Lifter::run(const wasm::Instr &ins) {
     } else if (op == op::If) {
         pop(0);
         if (target) {
-            branchIf(il_.CompareNotEqual(4, val(0, 4), c4(0)), addr_ + ins.size, *target);
+            // With an empty then-body the true edge must skip straight past the
+            // else body; otherwise it enters at addr + ins.size (the else marker).
+            const auto skip = fa_->elseSkip.find(addr_);
+            const uint64_t trueTarget = skip != fa_->elseSkip.end() ? skip->second : addr_ + ins.size;
+            branchIf(il_.CompareNotEqual(4, val(0, 4), c4(0)), trueTarget, *target);
             terminal = true;
         }
     } else if (op == op::BrIf) {
@@ -676,7 +742,9 @@ void Lifter::run(const wasm::Instr &ins) {
             const auto *mv = fa_->movesAt(addr_);
             const ExprId cond = il_.CompareNotEqual(4, val(0, 4), c4(0));
             const bool adj = wasm::FunctionAnalysis::lookup(fa_->edgeAdj, addr_) != 0;
-            branchIf(cond, *target, addr_ + ins.size,
+            const auto skip = fa_->elseSkip.find(addr_);
+            const uint64_t falseTarget = skip != fa_->elseSkip.end() ? skip->second : addr_ + ins.size;
+            branchIf(cond, *target, falseTarget,
                      mv || adj ? std::function<void()>([&] {
                          moves(mv);
                          adjustSp(fa_->edgeAdj, addr_);
@@ -734,7 +802,9 @@ void Lifter::run(const wasm::Instr &ins) {
             const auto *mv = fa_->movesAt(addr_);
             const bool null = op == op::BrOnNull;
             const ExprId cond = null ? il_.CompareEqual(8, val(0), c8(0)) : il_.CompareNotEqual(8, val(0), c8(0));
-            branchIf(cond, *target, addr_ + ins.size,
+            const auto skip = fa_->elseSkip.find(addr_);
+            const uint64_t falseTarget = skip != fa_->elseSkip.end() ? skip->second : addr_ + ins.size;
+            branchIf(cond, *target, falseTarget,
                      [&] {
                          moves(mv);
                          adjustSp(fa_->edgeAdj, addr_);
@@ -775,9 +845,9 @@ void Lifter::run(const wasm::Instr &ins) {
     } else if (op == op::I64Const) {
         push(c8(static_cast<uint64_t>(ins.imm0)));
     } else if (op == op::F32Const) {
-        push(c4(static_cast<uint64_t>(ins.imm0)), 4);
+        push(il_.FloatConstRaw(4, static_cast<uint32_t>(ins.imm0)), 4);
     } else if (op == op::F64Const) {
-        push(c8(static_cast<uint64_t>(ins.imm0)));
+        push(il_.FloatConstRaw(8, static_cast<uint64_t>(ins.imm0)));
     } else if (op == op::RefNull) {
         push(c8(0));
     } else if (op == op::RefIsNull) {
@@ -795,16 +865,13 @@ void Lifter::run(const wasm::Instr &ins) {
         pop(1);
         pop(0);
         const int dst = v_[0];
-        LowLevelILLabel taken, other, done;
-        add(il_.If(il_.CompareNotEqual(4, val(2, 4), c4(0)), taken, other));
-        il_.MarkLabel(taken);
-        const bool vec = fa_ && fa_->vecOps.count(addr_);
-        if (vec)
-            vwrite(dst, vreg(v_[0]));
-        else
-            write(dst, reg(v_[0]));
-        add(il_.Goto(done));
+        // The true value already lives in the destination slot; only the false
+        // value needs a copy.  Jumping straight to `done` avoids a self-move
+        // and a pointless taken block.
+        LowLevelILLabel other, done;
+        add(il_.If(il_.CompareNotEqual(4, val(2, 4), c4(0)), done, other));
         il_.MarkLabel(other);
+        const bool vec = fa_ && fa_->vecOps.count(addr_);
         if (vec)
             vwrite(dst, vreg(v_[1]));
         else

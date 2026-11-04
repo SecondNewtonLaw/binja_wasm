@@ -48,20 +48,23 @@ set(BN_API_PATH "" CACHE PATH "Local binaryninja-api checkout; empty = fetch via
 # Must match <BN_install>/api_REVISION.txt; mismatch makes the core reject the plugin.
 set(BN_API_REVISION "775c3b5eed8598217b20e1087afe7aa092a9b4b1"
     CACHE STRING "binaryninja-api commit matching the installed BN")
-option(BINJA_WASM_BUILD_TESTS "Build the standalone parser tests" ON)
+option(BINJA_WASM_BUILD_TESTS "Build the standalone parser/lifter tests" ON)
+option(BINJA_WASM_BUILD_PLUGIN "Build the Binary Ninja plugin (needs the BN API/install)" ON)
 
 set(HEADLESS ON CACHE BOOL "" FORCE)
-if(BN_API_PATH AND EXISTS "${BN_API_PATH}/CMakeLists.txt")
-  CPMAddPackage(
-    NAME binaryninjaapi
-    SOURCE_DIR "${BN_API_PATH}"
-    EXCLUDE_FROM_ALL YES)
-else()
-  CPMAddPackage(
-    NAME binaryninjaapi
-    GITHUB_REPOSITORY Vector35/binaryninja-api
-    GIT_TAG ${BN_API_REVISION}
-    EXCLUDE_FROM_ALL YES)
+if(BINJA_WASM_BUILD_PLUGIN)
+  if(BN_API_PATH AND EXISTS "${BN_API_PATH}/CMakeLists.txt")
+    CPMAddPackage(
+      NAME binaryninjaapi
+      SOURCE_DIR "${BN_API_PATH}"
+      EXCLUDE_FROM_ALL YES)
+  else()
+    CPMAddPackage(
+      NAME binaryninjaapi
+      GITHUB_REPOSITORY Vector35/binaryninja-api
+      GIT_TAG ${BN_API_REVISION}
+      EXCLUDE_FROM_ALL YES)
+  endif()
 endif()
 
 # BN-independent WASM core: parser, branch map, stack heights
@@ -77,29 +80,31 @@ add_library(wasm_core STATIC
 target_include_directories(wasm_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_features(wasm_core PUBLIC cxx_std_23)
 
-add_library(binja_wasm SHARED
-  src/plugin.cpp
-  src/bn/architecture.cpp
-  src/bn/view.cpp
-  src/bn/regs.cpp
-  src/bn/intrinsics.cpp
-  src/bn/state.cpp
-  src/bn/lifter.cpp)
-target_include_directories(binja_wasm PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
-target_compile_features(binja_wasm PRIVATE cxx_std_23)
-target_link_libraries(binja_wasm PRIVATE wasm_core binaryninjaapi)
-if(WIN32)
-  target_compile_definitions(binja_wasm PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX WIN32_LEAN_AND_MEAN)
-endif()
-set_target_properties(binja_wasm PROPERTIES PREFIX "" OUTPUT_NAME "binja_wasm")
+if(BINJA_WASM_BUILD_PLUGIN)
+  add_library(binja_wasm SHARED
+    src/plugin.cpp
+    src/bn/architecture.cpp
+    src/bn/view.cpp
+    src/bn/regs.cpp
+    src/bn/intrinsics.cpp
+    src/bn/state.cpp
+    src/bn/lifter.cpp)
+  target_include_directories(binja_wasm PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+  target_compile_features(binja_wasm PRIVATE cxx_std_23)
+  target_link_libraries(binja_wasm PRIVATE wasm_core binaryninjaapi)
+  if(WIN32)
+    target_compile_definitions(binja_wasm PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX WIN32_LEAN_AND_MEAN)
+  endif()
+  set_target_properties(binja_wasm PROPERTIES PREFIX "" OUTPUT_NAME "binja_wasm")
 
-set(BN_USER_PLUGINS_DIR "${_bn_plugins_default}"
-    CACHE PATH "Binary Ninja user plugins directory (auto-copy on build)")
-add_custom_command(TARGET binja_wasm POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E make_directory "${BN_USER_PLUGINS_DIR}"
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:binja_wasm>" "${BN_USER_PLUGINS_DIR}/"
-  COMMENT "Installing $<TARGET_FILE_NAME:binja_wasm> -> ${BN_USER_PLUGINS_DIR}"
-  VERBATIM)
+  set(BN_USER_PLUGINS_DIR "${_bn_plugins_default}"
+      CACHE PATH "Binary Ninja user plugins directory (auto-copy on build)")
+  add_custom_command(TARGET binja_wasm POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${BN_USER_PLUGINS_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:binja_wasm>" "${BN_USER_PLUGINS_DIR}/"
+    COMMENT "Installing $<TARGET_FILE_NAME:binja_wasm> -> ${BN_USER_PLUGINS_DIR}"
+    VERBATIM)
+endif()
 
 # Tests (no BN needed)
 if(BINJA_WASM_BUILD_TESTS)
@@ -107,4 +112,40 @@ if(BINJA_WASM_BUILD_TESTS)
   add_executable(wasm_core_test tests/module_test.cpp)
   target_link_libraries(wasm_core_test PRIVATE wasm_core)
   add_test(NAME wasm_core_test COMMAND wasm_core_test)
+
+  # The real lifter compiled against the partial IL in tests/support instead of
+  # the Binary Ninja API.  This keeps the tests honest: they exercise the same
+  # src/bn/lifter.cpp the plugin ships.
+  add_library(wasm_lifter_headless STATIC
+    src/bn/lifter.cpp
+    src/bn/intrinsics.cpp
+    src/bn/regs.cpp)
+  target_include_directories(wasm_lifter_headless PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/support"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src")
+  target_compile_features(wasm_lifter_headless PUBLIC cxx_std_23)
+  target_link_libraries(wasm_lifter_headless PUBLIC wasm_core)
+
+  add_executable(wasm_lift_tests tests/lift_tests.cpp)
+  target_link_libraries(wasm_lift_tests PRIVATE wasm_lifter_headless)
+  target_compile_definitions(wasm_lift_tests PRIVATE
+    WASM_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+  add_test(NAME wasm_lift_tests COMMAND wasm_lift_tests)
+
+  add_executable(wasm_lift_probe tools/lift_probe.cpp)
+  target_link_libraries(wasm_lift_probe PRIVATE wasm_lifter_headless)
+
+  set(WASM_TEST_MODULE "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/sample.wasm")
+  set(WASM_TEST_COMPLEX_MODULE "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/complex.wasm")
+  add_test(NAME wasm_lift_real_sample COMMAND wasm_lift_tests real_sample)
+  set_tests_properties(wasm_lift_real_sample PROPERTIES
+    ENVIRONMENT "WASM_TEST_MODULE=${WASM_TEST_MODULE}")
+  add_test(NAME wasm_lift_complex_sample COMMAND wasm_lift_tests complex_sample)
+  set_tests_properties(wasm_lift_complex_sample PROPERTIES
+    ENVIRONMENT "WASM_COMPLEX_MODULE=${WASM_TEST_COMPLEX_MODULE}")
+  add_test(NAME wasm_lift_probe_sample COMMAND wasm_lift_probe "${WASM_TEST_MODULE}" --check --quiet)
+  add_test(NAME wasm_lift_probe_complex COMMAND wasm_lift_probe "${WASM_TEST_COMPLEX_MODULE}" --check --quiet)
+
+  add_test(NAME wasm_core_analysis_sample COMMAND wasm_core_test "${WASM_TEST_MODULE}")
+  add_test(NAME wasm_core_analysis_complex COMMAND wasm_core_test "${WASM_TEST_COMPLEX_MODULE}")
 endif()

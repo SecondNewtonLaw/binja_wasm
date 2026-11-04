@@ -83,8 +83,12 @@ void branchMap(const Module &m, FunctionAnalysis &fa) {
             stack.pop_back();
             if (f.kind == FrameKind::If)
                 fa.branch[f.begin] = addr + ins.size;
-            else if (f.kind == FrameKind::Else)
+            else if (f.kind == FrameKind::Else) {
+                // Keep a dedicated skip edge: the last then-body instruction may
+                // already have a branch target of its own (br_if/br_on_*).
+                fa.elseSkip[f.elsePrev] = addr + ins.size;
                 fa.branch.emplace(f.elsePrev, addr + ins.size);
+            }
             for (const auto &[a, slot] : f.pending) {
                 if (slot >= 0)
                     fa.tables[a][slot] = addr;
