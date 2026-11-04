@@ -206,9 +206,20 @@ namespace lift_test {
                 throw IlTrap("IL call depth");
             if (dest >= bnwasm::kExternBase)
                 throw IlUnsupported("import call");
-            if (dest < bnwasm::kCodeBase)
-                throw IlTrap("call target outside code");
-            const uint64_t start = dest - bnwasm::kCodeBase;
+            uint64_t start;
+            if (dest < bnwasm::kCodeBase) {
+                // Test/ABI convenience: funcref values use function index + 1
+                // (matching the WASM oracle), while the lifter's ref.func emits
+                // a code pointer.
+                if (dest == 0 || dest > m_.functions.size())
+                    throw IlTrap("bad funcref value");
+                const auto &func = m_.functions[dest - 1];
+                if (!func.address)
+                    throw IlUnsupported("imported funcref");
+                start = *func.address;
+            } else {
+                start = dest - bnwasm::kCodeBase;
+            }
             const auto it = funcs_.find(start);
             if (it == funcs_.end())
                 throw IlTrap("call target not lifted");

@@ -1360,6 +1360,127 @@ void testConstDataPointer() {
         throw TestFailure("lift snapshot changed; review it and re-run with WASM_UPDATE_GOLDEN=1");
     }
 
+    // Targeted regression fixture: tests/fixtures/lift_issues.wat.  It covers
+    // the specific bugs fixed by this harness and the remaining readability
+    // checks.  SIMD spilling is structural-only (the oracle does not model the
+    // SIMD intrinsics).
+    void testLiftIssuesSample() {
+        const char *path = std::getenv("WASM_ISSUES_MODULE");
+        if (!path)
+            return;
+        std::ifstream in(path, std::ios::binary);
+        CHECK(in);
+        std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        auto m = wasm::parseModule(std::move(bytes));
+        CHECK(m.has_value());
+        Fixture fx(std::move(*m));
+
+        const auto check = [&](const char *name, const std::vector<Value> &args) {
+            return fx.check(fx.indexOf(name), args, std::string("issues ") + name);
+        };
+
+        auto r = check("empty_then", {v32(1)});
+        CHECK_EQ(static_cast<uint32_t>(r.il[0].lo), 0u);
+        r = check("empty_then", {v32(0)});
+        CHECK_EQ(static_cast<uint32_t>(r.il[0].lo), 7u);
+
+        for (int outer = 0; outer < 2; ++outer)
+            for (int inner = 0; inner < 2; ++inner) {
+                r = check("brif_else", {v32(outer), v32(inner)});
+                CHECK_EQ(static_cast<uint32_t>(r.il[0].lo), outer ? 1u : 2u);
+            }
+
+        r = check("uninit_local", {});
+        CHECK_EQ(static_cast<uint32_t>(r.il[0].lo), 0u);
+        r = check("g0_set_const", {});
+        CHECK_EQ(static_cast<uint32_t>(r.il[0].lo), 42u);
+        r = check("g0_via_local", {});
+        CHECK_EQ(static_cast<uint32_t>(r.il[0].lo), 43u);
+        r = check("g1_bump", {});
+        CHECK_EQ(static_cast<uint32_t>(r.il[0].lo), 10u);
+        r = check("g2_bump", {});
+        CHECK_EQ(r.il[0].lo, 10000000001ull);
+
+        for (const char *name : {"multi3", "call_multi"}) {
+            r = check(name, {v32(7), v32(3)});
+            CHECK_EQ(r.il.size(), 3u);
+            CHECK_EQ(static_cast<uint32_t>(r.il[0].lo), 10u);
+            CHECK_EQ(static_cast<uint32_t>(r.il[1].lo), 4u);
+            CHECK_EQ(static_cast<uint32_t>(r.il[2].lo), 21u);
+        }
+
+        {
+            std::vector<Value> args;
+            for (uint32_t i = 1; i <= 10; ++i)
+                args.push_back(v32(i));
+            r = check("many_args", args);
+            CHECK_EQ(static_cast<uint32_t>(r.il[0].lo), 55u);
+        }
+        r = check("deep_stack", {});
+        CHECK_EQ(static_cast<uint32_t>(r.il[0].lo), 40u);
+
+        for (int c = 0; c < 2; ++c) {
+            r = check("sel", {v32(c), v32(11), v32(22)});
+            CHECK_EQ(static_cast<uint32_t>(r.il[0].lo), c ? 11u : 22u);
+        }
+
+        r = check("apply_indirect", {v32(0), v32(5)});
+        CHECK_EQ(static_cast<uint32_t>(r.il[0].lo), 6u);
+        r = check("apply_indirect", {v32(1), v32(5)});
+        CHECK_EQ(static_cast<uint32_t>(r.il[0].lo), 10u);
+        r = check("tail_caller", {v32(5)});
+        CHECK_EQ(static_cast<uint32_t>(r.il[0].lo), 6u);
+
+        const uint32_t addOne = fx.indexOf("add_one");
+        r = check("apply_ref", {Value{static_cast<uint64_t>(addOne) + 1, 0}, v32(5)});
+        CHECK_EQ(static_cast<uint32_t>(r.il[0].lo), 6u);
+        r = check("ref_test", {});
+        CHECK_EQ(static_cast<uint32_t>(r.il[0].lo), 0u);
+
+        r = check("float32_const", {});
+        CHECK_EQ(static_cast<uint32_t>(r.il[0].lo), std::bit_cast<uint32_t>(1.5f));
+        r = check("float64_const", {});
+        CHECK_EQ(r.il[0].lo, std::bit_cast<uint64_t>(3.141592653589793));
+        r = check("wrap64", {v64(0x123456789ABCDEFull)});
+        CHECK_EQ(static_cast<uint32_t>(r.il[0].lo), 0x89ABCDEFu);
+
+        for (uint32_t x = 0; x < 4; ++x) {
+            r = check("br_table", {v32(x)});
+            const uint32_t expect = x == 0 ? 10 : x == 1 ? 20 : x == 2 ? 30 : 0;
+            CHECK_EQ(static_cast<uint32_t>(r.il[0].lo), expect);
+        }
+
+        r = check("load_store", {v32(0x40), v32(123)});
+        CHECK_EQ(static_cast<uint32_t>(r.il[0].lo), 123u);
+        r = check("bulk", {});
+        CHECK_EQ(static_cast<uint32_t>(r.il[0].lo), 0xABABABABu);
+        r = check("init", {});
+        CHECK_EQ(static_cast<uint32_t>(r.il[0].lo), 0x04030201u);
+
+        r = check("block_param", {v32(5)});
+        CHECK_EQ(static_cast<uint32_t>(r.il[0].lo), 6u);
+        r = check("multi_block", {});
+        CHECK_EQ(static_cast<uint32_t>(r.il[0].lo), 11u);
+        CHECK_EQ(static_cast<uint32_t>(r.il[1].lo), 22u);
+
+        const Value vecA{0x1111111111111111ull, 0x2222222222222222ull};
+        const Value vecB{0x3333333333333333ull, 0x4444444444444444ull};
+        r = check("v128_id", {vecA});
+        CHECK_EQ(r.il[0].lo, vecA.lo);
+        CHECK_EQ(r.il[0].hi, vecA.hi);
+        for (int c = 0; c < 2; ++c) {
+            r = check("v128_select", {v32(c), vecA, vecB});
+            const Value &expect = c ? vecA : vecB;
+            CHECK_EQ(r.il[0].lo, expect.lo);
+            CHECK_EQ(r.il[0].hi, expect.hi);
+        }
+
+        r = check("clz", {v32(0x80000000)});
+        CHECK_EQ(static_cast<uint32_t>(r.il[0].lo), 0u);
+        r = check("popcnt", {v32(0xFFFFFFFF)});
+        CHECK_EQ(static_cast<uint32_t>(r.il[0].lo), 32u);
+    }
+
     // Optional broader clang fixture: recursion, br_table, loops, 64-bit, floats,
     // memory, popcount/clz and select.
     void testComplexSample() {
@@ -1546,6 +1667,7 @@ int main(int argc, char **argv) {
         {"coverage", testCoverageMatrix},
         {"golden", testGolden},
         {"real_sample", testRealSample},
+        {"issues_sample", testLiftIssuesSample},
         {"complex_sample", testComplexSample},
     };
     int failed = 0;

@@ -39,6 +39,7 @@ IL structurally and semantically.
 | `coverage` | 531 generated functions covering every decodable plain/FC/FD/FE opcode family; fails on `unimplemented` IL or unmarked labels. |
 | `golden` | A stable, reviewable IL snapshot in `tests/golden/lift_snapshots.txt`. |
 | `real_sample`, `complex_sample` | Clang-produced modules (`tests/fixtures/sample.wasm`, `complex.wasm`) run through both engines: recursion, br_table, loops, floats, memory, shadow stack, popcount/clz, function pointers via `call_indirect`, and v128 transport. Enabled by `WASM_TEST_MODULE` / `WASM_COMPLEX_MODULE`. |
+| `issues_sample` | `tests/fixtures/lift_issues.wasm`, a hand-written regression module for every bug fixed by the harness (empty then, br_if at the else boundary, zero locals, global 0 as an ordinary counter, global widths, multi-value, 10 arguments, spills, select, call_indirect/call_ref, float constants, wrap_i64, br_table, bulk memory, block params, v128, SIMD spill, clz/popcnt). Enabled by `WASM_ISSUES_MODULE`. |
 
 ## Files
 
@@ -77,6 +78,23 @@ Probe:
 ./cmake-build-release/wasm_lift_probe tests/fixtures/sample.wasm --json --check
 python tools/lift_audit.py ./cmake-build-release/wasm_lift_probe corpus/ --out report.md
 ```
+
+## Regression sample for Binary Ninja
+
+`tests/fixtures/lift_issues.wat` is the targeted sample for the fixes above.
+Rebuild it with WABT:
+
+```
+wat2wasm --enable-all --debug-names tests/fixtures/lift_issues.wat -o tests/fixtures/lift_issues.wasm
+```
+
+Open `tests/fixtures/lift_issues.wasm` in Binary Ninja with the updated plugin,
+then run `tools/bn_check_lift.py` from `Tools > Run Script`. The script checks
+that the new register banks (`gv*`/`tv*`) are present, scans every function for
+`LLIL_UNIMPL`/`LLIL_UNDEF`, and prints the LLIL/HLIL of each target function
+with per-case checks (zero local, `a9`, `r2`, `g0` write, 4-byte `g1`, no
+`select` self-move, direct `clz`, float display, table target, v128 shift 64,
+SIMD `tv0`).
 
 ## Updating the golden snapshot
 

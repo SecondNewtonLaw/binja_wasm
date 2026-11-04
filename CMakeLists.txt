@@ -137,15 +137,21 @@ if(BINJA_WASM_BUILD_TESTS)
 
   set(WASM_TEST_MODULE "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/sample.wasm")
   set(WASM_TEST_COMPLEX_MODULE "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/complex.wasm")
+  set(WASM_TEST_ISSUES_MODULE "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/lift_issues.wasm")
   add_test(NAME wasm_lift_real_sample COMMAND wasm_lift_tests real_sample)
   set_tests_properties(wasm_lift_real_sample PROPERTIES
     ENVIRONMENT "WASM_TEST_MODULE=${WASM_TEST_MODULE}")
   add_test(NAME wasm_lift_complex_sample COMMAND wasm_lift_tests complex_sample)
   set_tests_properties(wasm_lift_complex_sample PROPERTIES
     ENVIRONMENT "WASM_COMPLEX_MODULE=${WASM_TEST_COMPLEX_MODULE}")
+  add_test(NAME wasm_lift_issues_sample COMMAND wasm_lift_tests issues_sample)
+  set_tests_properties(wasm_lift_issues_sample PROPERTIES
+    ENVIRONMENT "WASM_ISSUES_MODULE=${WASM_TEST_ISSUES_MODULE}")
   add_test(NAME wasm_lift_probe_sample COMMAND wasm_lift_probe "${WASM_TEST_MODULE}" --check --quiet)
   add_test(NAME wasm_lift_probe_complex COMMAND wasm_lift_probe "${WASM_TEST_COMPLEX_MODULE}" --check --quiet)
+  add_test(NAME wasm_lift_probe_issues COMMAND wasm_lift_probe "${WASM_TEST_ISSUES_MODULE}" --check --quiet)
 
   add_test(NAME wasm_core_analysis_sample COMMAND wasm_core_test "${WASM_TEST_MODULE}")
   add_test(NAME wasm_core_analysis_complex COMMAND wasm_core_test "${WASM_TEST_COMPLEX_MODULE}")
+  add_test(NAME wasm_core_analysis_issues COMMAND wasm_core_test "${WASM_TEST_ISSUES_MODULE}")
 endif()

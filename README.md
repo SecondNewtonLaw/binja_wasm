@@ -60,4 +60,6 @@ ctest --test-dir cmake-build-release
 
 The probe reports unimplemented opcodes, spills, intrinsic usage, native-vs-intrinsic arithmetic, and optionally dumps the lifted IL with `--dump <hex-offset>`; `tools/lift_audit.py` aggregates the `--json` output over a corpus.
 
+`tests/fixtures/lift_issues.wasm` (source: `tests/fixtures/lift_issues.wat`) is a targeted regression module for the lifting fixes. Open it in Binary Ninja and run `tools/bn_check_lift.py` from `Tools > Run Script` to verify the active plugin build, scan for unimplemented IL, and dump the LLIL/HLIL of each case. The script checks the new `gv*`/`tv*` banks as a build marker, so it will tell you if the old manager-installed DLL is still the active one.
+
 Created using Claude Sonnet 5.5, after a spiteful afternoon reversing a WASM binary with the Python plugin!
