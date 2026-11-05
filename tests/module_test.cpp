@@ -188,6 +188,20 @@ static void parserHardening() {
         assert(m->globalInits[0] == 3);
     }
 
+    // A v128.const global payload can contain 0x0B bytes; consume all 16.
+    {
+        const std::vector<uint8_t> bytes = {
+            0x00, 'a', 's', 'm', 1, 0, 0, 0,
+            6, 22, 1, 0x7B, 0x00, 0xFD, 0x0C,
+            0x0B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x0B,
+        };
+        const auto m = wasm::parseModule(bytes);
+        assert(m && m->globalTypes.size() == 1 && m->globalTypes[0] == 0x7B);
+        assert(m->globalInits.size() == 1 && m->globalInits[0] == 0);
+    }
+
     // A table minimum beyond the cap must be rejected before allocation.
     {
         const std::vector<uint8_t> bytes = {

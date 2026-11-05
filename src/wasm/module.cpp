@@ -110,6 +110,19 @@ static std::optional<uint64_t> evalConstExpr(Reader &r, const std::vector<uint64
                 push({0, idx < types.size() ? types[idx] : kI32, false});
             break;
         }
+        case 0xFD: {  // SIMD prefix
+            const uint64_t sub = r.uleb();
+            if (sub != 0x0C)  // v128.const
+                throw DecodeError(std::format("unsupported 0xFD const expression {:#x}", sub));
+            for (int i = 0; i < 16; ++i)
+                r.u8();
+            // The 128-bit payload does not fit m.globalInits; consume it and
+            // record an unknown value so the module still opens.
+            push({0, kV128, false});
+            break;
+        }
+        case 0xFB:  // GC prefix
+            throw DecodeError("unsupported 0xFB const expression");
         case op::I32Add:
         case op::I32Sub:
         case op::I32Mul:

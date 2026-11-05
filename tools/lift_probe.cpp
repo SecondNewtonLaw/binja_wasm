@@ -239,9 +239,14 @@ int main(int argc, char **argv) {
         reports.push_back(std::move(rep));
     }
 
+    const bool checkFailed =
+        failed != 0 || std::any_of(reports.begin(), reports.end(), [](const auto &f) {
+            return f.unimplemented != 0 || f.errors != 0;
+        });
+
     if (json) {
         printJson(reports, analyzed, failed);
-        return 0;
+        return check && checkFailed ? 1 : 0;
     }
 
     size_t totalUnimpl = 0, totalErrors = 0, totalIl = 0, totalWasm = 0;
@@ -294,7 +299,7 @@ int main(int argc, char **argv) {
         }
     }
 
-    if (check && (totalUnimpl != 0 || totalErrors != 0 || failed != 0))
+    if (check && checkFailed)
         return 1;
     return 0;
 }
