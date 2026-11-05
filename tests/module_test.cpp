@@ -176,6 +176,60 @@ static void realModule(const char *path) {
                 vecSel, tries, throwing);
 }
 
+static void parserHardening() {
+    // Extended constant expressions: i32.const 1; i32.const 2; i32.add; end.
+    {
+        const std::vector<uint8_t> bytes = {
+            0x00, 'a', 's', 'm', 1, 0, 0, 0,
+            6, 9, 1, 0x7F, 0x00, 0x41, 0x01, 0x41, 0x02, 0x6A, 0x0B,
+        };
+        const auto m = wasm::parseModule(bytes);
+        assert(m && m->globalTypes.size() == 1 && m->globalInits.size() == 1);
+        assert(m->globalInits[0] == 3);
+    }
+
+    // A table minimum beyond the cap must be rejected before allocation.
+    {
+        const std::vector<uint8_t> bytes = {
+            0x00, 'a', 's', 'm', 1, 0, 0, 0,
+            4, 7, 1, 0x70, 0x00, 0x81, 0x80, 0x80, 0x08,  // min = 1<<24 + 1
+        };
+        assert(!wasm::parseModule(bytes));
+    }
+
+    // Element flag 2 includes an elemkind byte before the function index count.
+    {
+        const std::vector<uint8_t> bytes = {
+            0x00, 'a', 's', 'm', 1, 0, 0, 0,
+            4, 4, 1, 0x70, 0x00, 0x01,
+            9, 9, 1, 0x02, 0x00, 0x41, 0x00, 0x0B, 0x00, 0x01, 0x00,
+        };
+        const auto m = wasm::parseModule(bytes);
+        assert(m && m->table.size() == 1 && m->table[0] == 0);
+    }
+
+    // i64.const -1 as an element offset must not wrap the table bounds check.
+    {
+        const std::vector<uint8_t> bytes = {
+            0x00, 'a', 's', 'm', 1, 0, 0, 0,
+            4, 4, 1, 0x70, 0x00, 0x01,
+            9, 7, 1, 0x00, 0x42, 0x7F, 0x0B, 0x01, 0x00,
+        };
+        assert(!wasm::parseModule(bytes));
+    }
+
+    // A data offset of 11 contains 0x0B as an immediate, not the expression End.
+    {
+        const std::vector<uint8_t> bytes = {
+            0x00, 'a', 's', 'm', 1, 0, 0, 0,
+            11, 7, 1, 0x00, 0x41, 0x0B, 0x0B, 0x01, 0x41,
+        };
+        const auto m = wasm::parseModule(bytes);
+        assert(m && m->dataSegments.size() == 1);
+        assert(m->dataSegments[0].memAddr == 11 && m->dataSegments[0].size == 1);
+    }
+}
+
 int main(int argc, char **argv) {
     const std::array<uint8_t, 3> leb = {0xE5, 0x8E, 0x26}; // 624485
     size_t pos = 0;
@@ -189,6 +243,7 @@ int main(int argc, char **argv) {
     assert(!wasm::parseModule(bad));
 
     handmade();
+    parserHardening();
     if (argc > 1)
         realModule(argv[1]);
     return 0;

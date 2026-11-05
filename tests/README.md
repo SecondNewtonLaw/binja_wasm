@@ -56,6 +56,8 @@ IL structurally and semantically.
 
 ## Running
 
+Use the host-specific preset: `release` on Windows, `linux-release` on Linux, and `macos-release` on macOS. The build directory follows the preset, e.g. `cmake-build-linux-release`.
+
 ```
 cmake --preset release -DBINJA_WASM_BUILD_PLUGIN=OFF
 cmake --build --preset release
@@ -101,8 +103,16 @@ result, recovered `switch`, SIMD `tv0`).
 Review the diff, then:
 
 ```
+# POSIX (use linux-release / macos-release on those hosts)
 WASM_UPDATE_GOLDEN=1 ./cmake-build-release/wasm_lift_tests golden
 ```
+
+```powershell
+# PowerShell on Windows
+$env:WASM_UPDATE_GOLDEN = "1"; ./cmake-build-release/wasm_lift_tests.exe golden
+```
+
+The build directory follows the preset: `cmake-build-release` on Windows, `cmake-build-linux-release` on Linux, and `cmake-build-macos-release` on macOS.
 
 ## Adding a test
 

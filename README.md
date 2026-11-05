@@ -35,11 +35,16 @@ The plugin must be built against the API revision of your Binary Ninja install (
 
 Requirements: CMake 3.28+, Ninja, LLVM/clang, MSVC build tools (for the Windows SDK and CRT).
 
+The presets are host-specific: `release` on Windows, `linux-release` on Linux, and `macos-release` on macOS. The build directory follows the preset (`cmake-build-<preset>`).
+
 ```
+# Windows
 cmake --preset release
 cmake --build --preset release
 ctest --test-dir cmake-build-release
 ```
+
+On Linux or macOS, substitute `linux-release` or `macos-release` for `release` in all three commands (and in the `cmake-build-*` directory name).
 
 - `-DLLVM_ROOT=<path>` points at the LLVM install (default `F:/SDKs/LLVM`, or the `LLVM_ROOT` environment variable).
 - `-DBN_API_REVISION=<commit|tag>` selects the `binaryninja-api` revision to fetch.
@@ -52,6 +57,7 @@ ctest --test-dir cmake-build-release
 Headless test/probe build:
 
 ```
+# Use release (Windows), linux-release (Linux), or macos-release (macOS).
 cmake --preset release -DBINJA_WASM_BUILD_PLUGIN=OFF
 cmake --build --preset release
 ctest --test-dir cmake-build-release

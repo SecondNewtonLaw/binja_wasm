@@ -261,6 +261,10 @@ namespace wasmtest {
                 while (i-- > 0) {
                     if (frames[i].end == target || frames[i].start == target)
                         break;
+                    // Loop branches target the body (after the `loop` opcode),
+                    // not the opcode itself.
+                    if (frames[i].kind == Frame::Loop && target > frames[i].start && target < frames[i].end)
+                        break;
                 }
                 if (i >= frames.size())
                     throw WasmTrap("branch target outside control stack");
@@ -352,6 +356,8 @@ namespace wasmtest {
                     const Value ref = pop();
                     const bool isNull = ref.lo == 0;
                     if ((op == wasm::op::BrOnNull && isNull) || (op == wasm::op::BrOnNonNull && !isNull)) {
+                        if (op == wasm::op::BrOnNonNull)
+                            push(ref);  // the label receives the non-null reference
                         branchTo(*target, fa->movesAt(pc));
                     } else {
                         if (op == wasm::op::BrOnNull)
@@ -1180,9 +1186,10 @@ namespace wasmtest {
             const auto push = [&](Value v) { stack.push_back(v); };
             const Value a = pop();
             const auto truncChecked = [](double x, double lo, double hi) {
-                if (std::isnan(x) || x < lo || x >= hi)
+                const double t = std::trunc(x);
+                if (std::isnan(t) || t < lo || t >= hi)
                     throw WasmTrap("float-to-int out of range");
-                return std::trunc(x);
+                return t;
             };
             const double i32Lo = -std::ldexp(1.0, 31);
             const double i32Hi = std::ldexp(1.0, 31);

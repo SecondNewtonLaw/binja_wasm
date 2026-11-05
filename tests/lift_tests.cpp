@@ -421,9 +421,9 @@ namespace {
             std::vector<Value> inputs;
         };
         std::vector<Value> smallF32 = {vf32(0.0f), vf32(1.5f), vf32(-2.5f), vf32(123.75f), vf32(65535.0f)};
-        std::vector<Value> smallF64 = {vf64(0.0), vf64(1.5), vf64(-2.5), vf64(123.75), vf64(2048.5)};
-        std::vector<Value> posF32 = {vf32(0.0f), vf32(1.5f), vf32(2.5f), vf32(123.75f), vf32(1e9f)};
-        std::vector<Value> posF64 = {vf64(0.0), vf64(1.5), vf64(2.5), vf64(123.75), vf64(1e18)};
+        std::vector<Value> smallF64 = {vf64(0.0), vf64(1.5), vf64(-2.5), vf64(-2147483648.5), vf64(123.75), vf64(2048.5)};
+        std::vector<Value> posF32 = {vf32(0.0f), vf32(-0.5f), vf32(1.5f), vf32(2.5f), vf32(123.75f), vf32(1e9f)};
+        std::vector<Value> posF64 = {vf64(0.0), vf64(-0.5), vf64(1.5), vf64(2.5), vf64(123.75), vf64(1e18)};
         const std::vector<Case> cases = {
             {0xA7, I64, I32, i64Inputs()}, {0xA8, F32, I32, smallF32},    {0xA9, F32, I32, posF32},      {0xAA, F64, I32, smallF64},
             {0xAB, F64, I32, posF64},      {0xAC, I32, I64, i32Inputs()}, {0xAD, I32, I64, i32Inputs()}, {0xAE, F32, I64, smallF32},
@@ -846,6 +846,27 @@ namespace {
         }
     }
 
+    void testLoopAtStart() {
+        // A loop as the first instruction of the body must not re-run the
+        // function prologue on its back-edge.  A global counter keeps the
+        // loop terminating even if a regression resets the local each time.
+        ModuleBuilder b;
+        b.addGlobal(I32, 0, true); // g0: shadow stack pointer convention
+        b.addGlobal(I32, 0, true); // g1: loop counter
+        Code c;
+        c.loop(-64);
+        c.globalGet(1).i32(1).op(0x6A).globalSet(1);
+        c.localGet(0).i32(1).op(0x6A).localSet(0);
+        c.globalGet(1).i32(3).op(0x49).brIf(0);
+        c.end();
+        c.localGet(0).end();
+        const uint32_t f = b.addTypedFunction({}, {I32}, c.b, {I32});
+        Fixture fx(b);
+        auto r = fx.check(f, {}, "loop at function start");
+        CHECK_EQ(static_cast<uint32_t>(r.wasm[0].lo), 3u);
+        CHECK_EQ(static_cast<uint32_t>(r.il[0].lo), 3u);
+    }
+
     void testBrTable() {
         ModuleBuilder b;
         Code c;
@@ -1186,6 +1207,18 @@ namespace {
     CHECK_EQ(static_cast<uint32_t>(r.il[0].lo), 0u);
     r = fx.check(f, {Value{1, 0}}, "br_on_null non-null");
     CHECK_EQ(static_cast<uint32_t>(r.il[0].lo), 1u);
+}
+
+void testBrOnNonNull() {
+    ModuleBuilder b;
+    Code c;
+    c.block(blockType(0x70)).localGet(0).op(0xD6).uleb(0).refNull().end().refIsNull().end();
+    const uint32_t f = b.addTypedFunction({0x70}, {I32}, c.b);
+    Fixture fx(b);
+    auto r = fx.check(f, {Value{0, 0}}, "br_on_non_null null");
+    CHECK_EQ(static_cast<uint32_t>(r.il[0].lo), 1u);
+    r = fx.check(f, {Value{1, 0}}, "br_on_non_null non-null");
+    CHECK_EQ(static_cast<uint32_t>(r.il[0].lo), 0u);
 }
 
 void testRefs() {
@@ -1644,6 +1677,7 @@ int main(int argc, char **argv) {
         {"branch_moves", testBranchMoves},
         {"br_if", testBrIf},
         {"loop", testLoop},
+        {"loop_at_start", testLoopAtStart},
         {"br_table", testBrTable},
         {"select", testSelect},
         {"call", testCall},
@@ -1661,6 +1695,7 @@ int main(int argc, char **argv) {
         {"simd_spill_shape", testSimdSpillShape},
         {"readability", testReadability},
         {"br_on_null", testBrOnNull},
+        {"br_on_non_null", testBrOnNonNull},
         {"refs", testRefs},
         {"malformed_inputs", testMalformedInputs},
         {"const_data_pointer", testConstDataPointer},
