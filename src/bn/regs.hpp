@@ -10,15 +10,18 @@
 
 namespace bnwasm {
 
-constexpr uint32_t kNLocals = 128, kNGlobals = 4, kNArgs = 8, kNResults = 2, kNStack = 32;
+constexpr uint32_t kNLocals = 128, kNGlobals = 4, kNArgs = 16, kNResults = 8, kNStack = 32;
 
 // Fake address spaces: code is mapped away from 0 so linear-memory constants don't resolve to code.
 constexpr uint64_t kCodeBase = 0xC0000000;
 constexpr uint64_t kExternBase = 0xF0000000;
 
-// Lv / X hold whole v128 values (locals / stack slots).
+// Lv / X hold whole v128 values (locals / stack slots), Gv v128 globals, and
+// Tv temporary v128 intrinsic results.
 // Ah / Rh carry the upper half of v128 arguments / results.
-enum class Bank : uint32_t { Sp, L, Lv, G, A, R, S, X, Ld, Sd, Ah, Rh, Count };
+enum class Bank : uint32_t { Sp, L, Lv, G, Gv, A, R, S, X, Ld, Sd, Ah, Rh, Tv, Count };
+
+constexpr uint32_t kNSimdTemps = 4;
 
 struct RegDef {
     std::string name;

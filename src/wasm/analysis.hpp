@@ -40,6 +40,10 @@ struct FunctionAnalysis {
     std::vector<uint32_t> heights;  // operand stack height before each instruction
 
     std::unordered_map<uint64_t, uint64_t> branch;                 // instruction -> target
+    // Last instruction of a then-body -> instruction after the matching end.
+    // Needed when that instruction is a conditional branch whose normal false
+    // edge lands on the `else` marker instead of skipping the else body.
+    std::unordered_map<uint64_t, uint64_t> elseSkip;
     std::unordered_map<uint64_t, std::vector<uint64_t>> tables;    // br_table -> targets + default
     std::unordered_map<uint64_t, std::vector<Move>> moves;         // br/br_if/br_on_* -> value moves
     std::unordered_map<uint64_t, std::vector<std::vector<Move>>> tableMoves;  // br_table -> moves per label

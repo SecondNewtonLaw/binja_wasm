@@ -51,7 +51,11 @@ void branchMap(const Module &m, FunctionAnalysis &fa) {
         } else if (o == op::Block || o == op::Try) {
             stack.push_back({FrameKind::Block, addr, {}, 0});
         } else if (o == op::Loop) {
-            stack.push_back({FrameKind::Loop, addr, {}, 0});
+            // A branch to a loop label enters the loop body, not the `loop`
+            // opcode itself.  Targeting the opcode would re-run the function
+            // prologue (parameter copies + local zeroing) on every back-edge
+            // when the loop is the first instruction of the body.
+            stack.push_back({FrameKind::Loop, addr + ins.size, {}, 0});
         } else if (o == op::If) {
             stack.push_back({FrameKind::If, addr, {}, 0});
         } else if (o == op::Else && stack.back().kind == FrameKind::If) {
@@ -83,8 +87,12 @@ void branchMap(const Module &m, FunctionAnalysis &fa) {
             stack.pop_back();
             if (f.kind == FrameKind::If)
                 fa.branch[f.begin] = addr + ins.size;
-            else if (f.kind == FrameKind::Else)
+            else if (f.kind == FrameKind::Else) {
+                // Keep a dedicated skip edge: the last then-body instruction may
+                // already have a branch target of its own (br_if/br_on_*).
+                fa.elseSkip[f.elsePrev] = addr + ins.size;
                 fa.branch.emplace(f.elsePrev, addr + ins.size);
+            }
             for (const auto &[a, slot] : f.pending) {
                 if (slot >= 0)
                     fa.tables[a][slot] = addr;

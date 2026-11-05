@@ -19,6 +19,7 @@ namespace wasm {
 constexpr size_t kLocalLimit = 128;
 
 constexpr uint32_t kNoType = ~0u;
+constexpr uint32_t kNoFunc = ~0u;  // uninitialised funcref table slot
 
 // Imports come first in the function index space and have no body.
 // Addresses are file offsets of the body's first instruction (after the locals header).
@@ -51,6 +52,12 @@ struct Module {
     std::unordered_map<uint64_t, uint32_t> addrIndex;          // body address -> function index
     std::unordered_set<uint64_t> simdFuncs;                    // bodies with v128 params/locals
     std::unordered_map<uint64_t, std::vector<uint8_t>> localTypes;  // body -> valtypes of first kLocalLimit locals
+
+    // Globals are indexed in import order followed by definition order.
+    std::vector<uint8_t> globalTypes;   // valtype byte per global
+    std::vector<uint64_t> globalInits;  // initial bit pattern (0 for imports / unknown exprs)
+    uint64_t memoryPages = 0;           // minimum linear-memory size in 64 KiB pages
+    std::vector<uint32_t> table;        // table 0: function indices, kNoFunc when uninitialised
 
     const FuncType *sig(uint32_t type) const { return type < types.size() ? &types[type] : nullptr; }
     const FuncType *funcSig(uint32_t index) const {

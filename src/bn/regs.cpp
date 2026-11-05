@@ -12,10 +12,11 @@ namespace bnwasm {
 namespace {
 
 constexpr std::array<uint32_t, static_cast<size_t>(Bank::Count)> kCounts = {
-    1, kNLocals, kNLocals, kNGlobals, kNArgs, kNResults, kNStack, kNStack, kNLocals, kNStack, kNArgs, kNResults,
+    1,       kNLocals, kNLocals, kNGlobals, kNGlobals, kNArgs, kNResults,
+    kNStack, kNStack,  kNLocals, kNStack,   kNArgs,   kNResults, kNSimdTemps,
 };
 constexpr std::array<const char *, static_cast<size_t>(Bank::Count)> kPrefix = {
-    "sp", "l", "v", "g", "a", "r", "s", "x", "ld", "sd", "ah", "rh",
+    "sp", "l", "v", "g", "gv", "a", "r", "s", "x", "ld", "sd", "ah", "rh", "tv",
 };
 
 // Ids start at 1; bank bases are cumulative.
@@ -50,7 +51,8 @@ const std::vector<RegDef> &allRegs() {
                 } else if (bank == Bank::Sd) {
                     r.push_back({std::format("sd{}", i), 4, regId(Bank::S, i), true});
                 } else {
-                    const uint32_t size = bank == Bank::Lv || bank == Bank::X ? 16 : 8;
+                    const uint32_t size =
+                        bank == Bank::Lv || bank == Bank::X || bank == Bank::Gv || bank == Bank::Tv ? 16 : 8;
                     r.push_back({std::format("{}{}", kPrefix[b], i), size, id, false});
                 }
             }
