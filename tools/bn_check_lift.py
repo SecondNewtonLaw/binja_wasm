@@ -78,18 +78,6 @@ def main(bv):
     p(f"BN-produced sub_* functions: {len(subs)}")
     for f in subs[:40]:
         p(f"  {f.name} @ 0x{f.start:x}")
-    jump_to_addrs = set()
-    for func in funcs:
-        try:
-            llil = func.llil
-        except Exception:  # noqa: BLE001
-            continue
-        if llil is None:
-            continue
-        for block in llil.basic_blocks:
-            for ins in block:
-                if ins.operation == L.LLIL_JUMP_TO:
-                    jump_to_addrs.add(ins.address)
     for func in funcs:
         try:
             llil = func.llil
@@ -113,11 +101,6 @@ def main(bv):
             addr = getattr(ref, "addr", None)
             if addr is None and isinstance(ref, (tuple, list)):
                 addr = ref[1]
-            # br_table switches use a selector-keyed JumpTo target list; BN
-            # reports those selector keys as unresolved even though the real
-            # case targets are registered through SetAutoIndirectBranches.
-            if addr in jump_to_addrs:
-                continue
             problems.append((func.name, addr or func.start, "unresolved_branch", ""))
 
     p(f"problems: {len(problems)}")

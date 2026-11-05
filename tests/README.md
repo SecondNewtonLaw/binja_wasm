@@ -135,12 +135,11 @@ the coverage matrix grows with it.
 - `call_indirect` semantics are modelled for table 0 (the common case); other
   tables are lifted structurally.
 - `br_table` with resolved targets and no per-edge moves or stack fixups is
-  lifted to a selector-keyed `JumpTo`, which BN recovers as a real
-  `switch (selector) { case 0 ... }`.  Tables with different moves/SP
-  adjustments per label still use a compare chain.  BN may list the
-  selector-keyed target list in `unresolved_indirect_branches`; the actual case
-  targets are registered through `SetAutoIndirectBranches`, so the check treats
-  a `LLIL_JUMP_TO` at that address as resolved.
+  lifted to a `JumpTo` whose destination is `selector + br_table_address` and
+  whose target keys are `br_table_address + k`.  BN subtracts the base, prints
+  `switch (selector) { case 0 ... }`, and treats the indirect branch as
+  resolved.  Tables with different moves/SP adjustments per label still use a
+  compare chain.
 - The `sp` spill pointer is an external scratch register. The IL interpreter
   initialises it; Binary Ninja's decompiler treats it as an ordinary register
   and prints spill-heavy HLIL through `entry_sp` memory accesses.

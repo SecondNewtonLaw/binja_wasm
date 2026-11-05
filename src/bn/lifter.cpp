@@ -448,16 +448,19 @@ void Lifter::brTable(const wasm::Instr &) {
                     labelsOk = false;
                     break;
                 }
-                // Key on the selector value, not the target address: that is
-                // what makes HLIL print `switch (a0) { case 0 ... }`.
-                labels[k] = label;
+                // Key the target list on address-shaped selector values.  BN
+                // subtracts the br_table address from both the keys and the
+                // computed destination, so the HLIL cases become 0..N and the
+                // indirect branch is considered resolved (the values fall
+                // inside the current function).
+                labels[kCodeBase + addr_ + k] = label;
             }
             auto *defaultLabel = il_.GetLabelForAddress(arch_, (*targets)[n] + kCodeBase);
             if (labelsOk && defaultLabel) {
                 LowLevelILLabel next;
                 add(il_.If(il_.CompareUnsignedGreaterThan(4, sel(), c4(n)), *defaultLabel, next));
                 il_.MarkLabel(next);
-                add(il_.JumpTo(sel(), labels));
+                add(il_.JumpTo(il_.Add(4, sel(), c4(kCodeBase + addr_)), labels));
                 return;
             }
         }
@@ -977,4 +980,3 @@ void lift(LowLevelILFunction &il, Architecture *arch, const wasm::Instr &ins, ui
 }
 
 } // namespace bnwasm
-
