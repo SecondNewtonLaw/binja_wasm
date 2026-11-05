@@ -135,4 +135,11 @@ the coverage matrix grows with it.
 - `call_indirect` semantics are modelled for table 0 (the common case); other
   tables are lifted structurally.
 - The `sp` spill pointer is an external scratch register. The IL interpreter
-  initialises it; Binary Ninja's decompiler treats it as an ordinary register.
+  initialises it; Binary Ninja's decompiler treats it as an ordinary register
+  and prints spill-heavy HLIL through `entry_sp` memory accesses.
+- Binary Ninja's HLIL has a single-return function type, so multi-value
+  functions show only the first result and v128 functions show only the low 64
+  bits in HLIL.  The LLIL is complete (`r0/r1/r2`, `r0/rh0`); this is a
+  debug-info/ABI limitation rather than a lifting error.
+- Float constants display as floats in LLIL but may appear as raw bit patterns
+  in HLIL.

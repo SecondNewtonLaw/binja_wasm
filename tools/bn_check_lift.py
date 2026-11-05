@@ -158,8 +158,10 @@ def main(bv):
             checks.append(("table_target", "__builtin_table_target" in text))
         if name == "v128_id":
             checks.append(("64-bit split/join", "0x40" in text or "64" in text))
-        if name in ("simd_spill", "simd_scalar"):
-            checks.append(("tv0 present", "tv0" in text))
+        if name == "simd_spill":
+            checks.append(("16-byte tv0 result", "tv0" in text))
+        if name == "simd_scalar":
+            checks.append(("scalar temp result", "temp8" in text and "__builtin_i32x4_all_true" in text))
         if name == "empty_then":
             # The true edge must land after the else body (the local stays 0).
             checks.append(("then path skips else", text.count("sd0 = 7") <= 1))
