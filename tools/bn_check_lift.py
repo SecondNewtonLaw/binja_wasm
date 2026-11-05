@@ -74,6 +74,10 @@ def main(bv):
     problems = []
     funcs = list(bv.functions)
     p(f"functions: {len(funcs)}")
+    subs = [f for f in funcs if f.name.startswith("sub_")]
+    p(f"BN-produced sub_* functions: {len(subs)}")
+    for f in subs[:40]:
+        p(f"  {f.name} @ 0x{f.start:x}")
     for func in funcs:
         try:
             llil = func.llil
@@ -114,7 +118,10 @@ def main(bv):
         if llil is None:
             p("  <no LLIL>")
             continue
-        lines = str(llil).splitlines()
+        lines = []
+        for block in llil.basic_blocks:
+            for ins in block:
+                lines.append(str(ins))
         p("\n".join(lines[:MAX_LINES]))
         if len(lines) > MAX_LINES:
             p(f"  ... {len(lines) - MAX_LINES} LLIL lines omitted ...")
@@ -138,11 +145,9 @@ def main(bv):
         if name in ("g0_set_const", "g0_via_local"):
             checks.append(("g0 write not nop", "g0 = " in text or "g0 =" in text))
         if name == "g1_bump":
-            info = bv.arch.get_register_info("g1")
-            checks.append(("g1 is 4 bytes", info.size == 4))
+            checks.append(("g1 is 4 bytes", bv.arch.regs["g1"].size == 4))
         if name == "g2_bump":
-            info = bv.arch.get_register_info("g2")
-            checks.append(("g2 is 8 bytes", info.size == 8))
+            checks.append(("g2 is 8 bytes", bv.arch.regs["g2"].size == 8))
         if name == "sel":
             checks.append(("no self-move", "s0 = s0" not in text))
         if name == "clz":

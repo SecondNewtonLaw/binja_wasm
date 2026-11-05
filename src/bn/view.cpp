@@ -172,8 +172,15 @@ bool WasmView::Init() {
         memEnd = s.memAddr + s.size;
     }
 
-    AddAutoSegment(kCodeBase, size, 0, size,
-                   SegmentReadable | SegmentExecutable | SegmentContainsData | SegmentContainsCode);
+    // Map only real function bodies.  Mapping the whole file as executable makes
+    // BN's linear sweep treat the locals headers and section bytes between
+    // bodies as orphan functions (sub_<locals-header>).
+    for (const auto &f : m.functions) {
+        if (!f.address || !f.size)
+            continue;
+        AddAutoSegment(kCodeBase + *f.address, f.size, *f.address, f.size,
+                       SegmentReadable | SegmentExecutable | SegmentContainsData | SegmentContainsCode);
+    }
 
     size_t imports = 0;
     for (size_t i = 0; i < m.functions.size(); ++i)

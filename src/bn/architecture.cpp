@@ -95,16 +95,32 @@ bool WasmArchitecture::GetInstructionInfo(const uint8_t *, uint64_t addr, size_t
         break;
     case wasm::op::If:
         if (target && *target != wasm::kFunctionEnd) {
+            // An empty then-body (or a conditional branch as the last then-body
+            // instruction) has a skip edge past the matching end.  Without it BN
+            // does not create a label/block there and the lift falls back to a
+            // raw jump(address), which HLIL cannot structure.
+            uint64_t trueTarget = addr + ins.size;
+            if (fa) {
+                const auto skip = fa->elseSkip.find(off);
+                if (skip != fa->elseSkip.end())
+                    trueTarget = at(skip->second);
+            }
             result.AddBranch(FalseBranch, at(*target));
-            result.AddBranch(TrueBranch, addr + ins.size);
+            result.AddBranch(TrueBranch, trueTarget);
         }
         break;
     case wasm::op::BrOnNull:
     case wasm::op::BrOnNonNull:
     case wasm::op::BrIf:
         if (target && *target != wasm::kFunctionEnd) {
+            uint64_t falseTarget = addr + ins.size;
+            if (fa) {
+                const auto skip = fa->elseSkip.find(off);
+                if (skip != fa->elseSkip.end())
+                    falseTarget = at(skip->second);
+            }
             result.AddBranch(TrueBranch, at(*target));
-            result.AddBranch(FalseBranch, addr + ins.size);
+            result.AddBranch(FalseBranch, falseTarget);
         }
         break;
     case wasm::op::BrTable:
