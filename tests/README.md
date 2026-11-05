@@ -94,7 +94,7 @@ that the new register banks (`gv*`/`tv*`) are present, scans every function for
 `LLIL_UNIMPL`/`LLIL_UNDEF`, and prints the LLIL/HLIL of each target function
 with per-case checks (zero local, `a9`, tuple return, `g0` write, 4-byte `g1`,
 no `select` self-move, direct `clz`, float display, table target, `uint128_t`
-result, SIMD `tv0`).
+result, recovered `switch`, SIMD `tv0`).
 
 ## Updating the golden snapshot
 
@@ -134,6 +134,13 @@ the coverage matrix grows with it.
   accessors; the semantic oracle does not execute the local variants.
 - `call_indirect` semantics are modelled for table 0 (the common case); other
   tables are lifted structurally.
+- `br_table` with resolved targets and no per-edge moves or stack fixups is
+  lifted to a selector-keyed `JumpTo`, which BN recovers as a real
+  `switch (selector) { case 0 ... }`.  Tables with different moves/SP
+  adjustments per label still use a compare chain.  BN may list the
+  selector-keyed target list in `unresolved_indirect_branches`; the actual case
+  targets are registered through `SetAutoIndirectBranches`, so the check treats
+  a `LLIL_JUMP_TO` at that address as resolved.
 - The `sp` spill pointer is an external scratch register. The IL interpreter
   initialises it; Binary Ninja's decompiler treats it as an ordinary register
   and prints spill-heavy HLIL through `entry_sp` memory accesses.

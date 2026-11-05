@@ -238,7 +238,7 @@ bool WasmArchitecture::GetInstructionLowLevelIL(const uint8_t *, uint64_t addr, 
     len = std::min<size_t>(ins.size, 256);
     const auto fa = st->cache.get(st->module, off);
     const size_t before = il.GetInstructionCount();
-    lift(il, this, ins, off, st->module, fa.get());
+    lift(il, this, ins, off, st->module, fa.get(), true);
     // A WASM opcode that maps to nothing (drop/nop/block/loop/else/end/...) must
     // still leave one IL instruction.  Otherwise BN inserts LLIL_UNDEF, which
     // HLIL turns into `undefined` and can cut the block's fallthrough.

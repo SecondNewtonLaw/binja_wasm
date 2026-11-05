@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstring>
 #include <functional>
+#include <map>
 
 #include <lowlevelilinstruction.h>
 
@@ -76,8 +77,8 @@ constexpr uint32_t temp(uint32_t n) { return 0x80000000u | n; }
 class Lifter {
 public:
     Lifter(LowLevelILFunction &il, Architecture *arch, const wasm::Module &m, const wasm::FunctionAnalysis *fa,
-           uint64_t addr)
-        : il_(il), arch_(arch), m_(m), fa_(fa), addr_(addr) {
+           uint64_t addr, bool structuredSwitch)
+        : il_(il), arch_(arch), m_(m), fa_(fa), addr_(addr), structuredSwitch_(structuredSwitch) {
         h_ = fa ? static_cast<int>(fa->heightAt(addr)) : 0;
         const ptrdiff_t i = m.startIndex(addr);
         if (i >= 0) {
@@ -96,6 +97,7 @@ private:
     const wasm::Module &m_;
     const wasm::FunctionAnalysis *fa_;
     uint64_t addr_;
+    bool structuredSwitch_;
     uint64_t funcStart_ = ~0ull;
     const wasm::FuncType *sig_ = nullptr;
     int h_ = 0;
@@ -398,6 +400,12 @@ void Lifter::brTable(const wasm::Instr &) {
         add(il_.Unimplemented());
         return;
     }
+    // Park the selector in a temporary.  The case bodies reuse the operand-stack
+    // slot (e.g. `sd0 = 0xa`), and BN's switch recovery only recognizes the
+    // compare chain when the tested value is not overwritten by the cases.
+    const uint32_t selector = temp(7);
+    add(il_.SetRegister(4, selector, val(0, 4)));
+    const auto sel = [&] { return il_.Register(4, selector); };
     const auto mv = fa_->tableMoves.find(addr_);
     const auto adj = fa_->tableAdj.find(addr_);
     // moves and SP fixup of label k, then the jump
@@ -419,17 +427,66 @@ void Lifter::brTable(const wasm::Instr &) {
                           mv->second[a].size() == mv->second[b].size();
         return d(a) == d(b) && mvOk;
     };
+    const auto hasEdgeWork = [&](size_t k) {
+        const bool moves = mv != fa_->tableMoves.end() && k < mv->second.size() && !mv->second[k].empty();
+        const bool adjK = trackSp() && adj != fa_->tableAdj.end() && k < adj->second.size() && adj->second[k] != 0;
+        return moves || adjK;
+    };
+    // BN recovers a switch when an indirect JumpTo carries a target list keyed
+    // by the selector values.  Only use it when every edge is a plain goto;
+    // per-edge moves or stack fixups still need the compare chain.
+    if (structuredSwitch_) {
+        bool simple = true;
+        for (size_t k = 0; k <= n && simple; ++k)
+            simple = !hasEdgeWork(k);
+        if (simple) {
+            std::map<uint64_t, BNLowLevelILLabel *> labels;
+            bool labelsOk = true;
+            for (size_t k = 0; k <= n; ++k) {
+                auto *label = il_.GetLabelForAddress(arch_, (*targets)[k] + kCodeBase);
+                if (!label) {
+                    labelsOk = false;
+                    break;
+                }
+                // Key on the selector value, not the target address: that is
+                // what makes HLIL print `switch (a0) { case 0 ... }`.
+                labels[k] = label;
+            }
+            auto *defaultLabel = il_.GetLabelForAddress(arch_, (*targets)[n] + kCodeBase);
+            if (labelsOk && defaultLabel) {
+                LowLevelILLabel next;
+                add(il_.If(il_.CompareUnsignedGreaterThan(4, sel(), c4(n)), *defaultLabel, next));
+                il_.MarkLabel(next);
+                add(il_.JumpTo(sel(), labels));
+                return;
+            }
+        }
+    }
     std::vector<size_t> seen;
     for (size_t k = 0; k < n; ++k) {
         if (same(k, n) ||
             std::any_of(seen.begin(), seen.end(), [&](size_t s) { return same(s, k); }))
             continue;
         seen.push_back(k);
-        ExprId cond = il_.CompareEqual(4, val(0, 4), c4(k));
-        for (size_t k2 = k + 1; k2 < n; ++k2)
-            if (same(k, k2))
-                cond = il_.Or(4, cond, il_.CompareEqual(4, val(0, 4), c4(k2)));
-        LowLevelILLabel nxt, taken;
+        ExprId cond = il_.CompareEqual(4, sel(), c4(k));
+        bool direct = !hasEdgeWork(k);
+        for (size_t k2 = k + 1; k2 < n; ++k2) {
+            if (!same(k, k2))
+                continue;
+            cond = il_.Or(4, cond, il_.CompareEqual(4, sel(), c4(k2)));
+            direct = direct && !hasEdgeWork(k2);
+        }
+        LowLevelILLabel nxt;
+        // With no per-edge moves/SP fixup the case body is a direct branch
+        // target.  Keeping the branch directly on the case label (instead of an
+        // intermediate goto block) is the shape BN's switch recovery expects.
+        BNLowLevelILLabel *caseLabel = direct ? il_.GetLabelForAddress(arch_, (*targets)[k] + kCodeBase) : nullptr;
+        if (caseLabel) {
+            add(il_.If(cond, *caseLabel, nxt));
+            il_.MarkLabel(nxt);
+            continue;
+        }
+        LowLevelILLabel taken;
         add(il_.If(cond, taken, nxt));
         il_.MarkLabel(taken);
         leave(k);
@@ -915,8 +972,9 @@ void Lifter::run(const wasm::Instr &ins) {
 } // namespace
 
 void lift(LowLevelILFunction &il, Architecture *arch, const wasm::Instr &ins, uint64_t addr,
-          const wasm::Module &module, const wasm::FunctionAnalysis *fa) {
-    Lifter(il, arch, module, fa, addr).run(ins);
+          const wasm::Module &module, const wasm::FunctionAnalysis *fa, bool structuredSwitch) {
+    Lifter(il, arch, module, fa, addr, structuredSwitch).run(ins);
 }
 
 } // namespace bnwasm
+

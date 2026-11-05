@@ -222,6 +222,9 @@ namespace BinaryNinja {
         ExprId FloatConvert(size_t size, ExprId a) { return unary(ILOp::FloatConvert, size, a); }
 
         ExprId Jump(ExprId dest) { return unary(ILOp::Jump, 0, dest); }
+        ExprId JumpTo(ExprId dest, const std::map<uint64_t, BNLowLevelILLabel *> &) {
+            return unary(ILOp::Jump, 0, dest);
+        }
         ExprId Call(ExprId dest) { return unary(ILOp::Call, 0, dest); }
         ExprId Goto(BNLowLevelILLabel &label) {
             ExprId e = make(ILOp::Goto, 0, 0);
