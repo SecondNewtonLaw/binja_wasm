@@ -668,7 +668,8 @@ void Lifter::convert(uint32_t op) {
     case 0xAA: push(il_.FloatToInt(4, val(0, 8)), 4); break;
     case 0xAE: push(il_.FloatToInt(8, val(0, 4)), 8); break;
     case 0xB0: push(il_.FloatToInt(8, val(0, 8)), 8); break;
-    case 0xA7: case 0xBC: case 0xBE: push(val(0, 4), 4); break;
+    case 0xA7: push(il_.LowPart(4, val(0, 8)), 4); break;  // wrap_i64: avoid `sd = sd`
+    case 0xBC: case 0xBE: push(val(0, 4), 4); break;
     case 0xAC: push(il_.SignExtend(8, val(0, 4))); break;
     case 0xAD: push(il_.ZeroExtend(8, val(0, 4))); break;
     case 0xB2: push(il_.IntToFloat(4, val(0, 4)), 4); break;

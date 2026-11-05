@@ -89,8 +89,15 @@ bool WasmArchitecture::GetInstructionInfo(const uint8_t *, uint64_t addr, size_t
     case wasm::op::ReturnCall:
         if (static_cast<uint64_t>(ins.imm0) < st->module.functions.size()) {
             result.AddBranch(CallDestination, funcAddress(st->module, static_cast<uint32_t>(ins.imm0)));
-            if (ins.op == wasm::op::ReturnCall)
+            if (ins.op == wasm::op::ReturnCall) {
                 result.AddBranch(FunctionReturn);
+            } else if (fa) {
+                // A call as the last then-body instruction still has to skip
+                // the else body on its continuation edge.
+                const auto skip = fa->elseSkip.find(off);
+                if (skip != fa->elseSkip.end())
+                    result.AddBranch(UnconditionalBranch, at(skip->second));
+            }
         }
         break;
     case wasm::op::If:
@@ -227,7 +234,13 @@ bool WasmArchitecture::GetInstructionLowLevelIL(const uint8_t *, uint64_t addr, 
     }
     len = std::min<size_t>(ins.size, 256);
     const auto fa = st->cache.get(st->module, off);
+    const size_t before = il.GetInstructionCount();
     lift(il, this, ins, off, st->module, fa.get());
+    // A WASM opcode that maps to nothing (drop/nop/block/loop/else/end/...) must
+    // still leave one IL instruction.  Otherwise BN inserts LLIL_UNDEF, which
+    // HLIL turns into `undefined` and can cut the block's fallthrough.
+    if (il.GetInstructionCount() == before)
+        il.AddInstruction(il.Nop());
     return true;
 }
 

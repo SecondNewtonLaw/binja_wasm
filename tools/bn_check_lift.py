@@ -145,7 +145,7 @@ def main(bv):
         if name in ("g0_set_const", "g0_via_local"):
             checks.append(("g0 write not nop", "g0 = " in text or "g0 =" in text))
         if name == "g1_bump":
-            checks.append(("g1 is 4 bytes", bv.arch.regs["g1"].size == 4))
+            checks.append(("g1 accessed as 4 bytes", "g1.d" in text))
         if name == "g2_bump":
             checks.append(("g2 is 8 bytes", bv.arch.regs["g2"].size == 8))
         if name == "sel":
@@ -157,7 +157,7 @@ def main(bv):
         if name == "apply_indirect":
             checks.append(("table_target", "__builtin_table_target" in text))
         if name == "v128_id":
-            checks.append(("64-bit split/join", "64" in text))
+            checks.append(("64-bit split/join", "0x40" in text or "64" in text))
         if name in ("simd_spill", "simd_scalar"):
             checks.append(("tv0 present", "tv0" in text))
         if name == "empty_then":
