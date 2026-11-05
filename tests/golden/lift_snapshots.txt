@@ -100,7 +100,7 @@ loc_c0000096:
 loc_c0000099:
   sd0 = f32(1.5)
 loc_c000009e:
-  r0 = s0
+  r0 = float_convert.u32(low.u32(s0))
   return ptr(0)
 
 === simd_add @a1 ===

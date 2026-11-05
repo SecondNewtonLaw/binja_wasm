@@ -92,9 +92,9 @@ Open `tests/fixtures/lift_issues.wasm` in Binary Ninja with the updated plugin,
 then run `tools/bn_check_lift.py` from `Tools > Run Script`. The script checks
 that the new register banks (`gv*`/`tv*`) are present, scans every function for
 `LLIL_UNIMPL`/`LLIL_UNDEF`, and prints the LLIL/HLIL of each target function
-with per-case checks (zero local, `a9`, `r2`, `g0` write, 4-byte `g1`, no
-`select` self-move, direct `clz`, float display, table target, v128 shift 64,
-SIMD `tv0`).
+with per-case checks (zero local, `a9`, tuple return, `g0` write, 4-byte `g1`,
+no `select` self-move, direct `clz`, float display, table target, `uint128_t`
+result, SIMD `tv0`).
 
 ## Updating the golden snapshot
 
@@ -137,9 +137,14 @@ the coverage matrix grows with it.
 - The `sp` spill pointer is an external scratch register. The IL interpreter
   initialises it; Binary Ninja's decompiler treats it as an ordinary register
   and prints spill-heavy HLIL through `entry_sp` memory accesses.
-- Binary Ninja's HLIL has a single-return function type, so multi-value
-  functions show only the first result and v128 functions show only the low 64
-  bits in HLIL.  The LLIL is complete (`r0/r1/r2`, `r0/rh0`); this is a
-  debug-info/ABI limitation rather than a lifting error.
-- Float constants display as floats in LLIL but may appear as raw bit patterns
-  in HLIL.
+- Binary Ninja's function type still has one return slot, but a return slot can
+  now be a packed tuple: multi-value functions get a structure return type and a
+  return location listing `r0..r7`.  HLIL reconstructs the tuple:
+  `return struct { .r0 = ..., .r1 = ..., .r2 = ... }`.
+- v128 is modelled as one 16-byte `uint128_t` rather than two unrelated u64
+  halves.  The return location maps `r{k}` at offset 0 and `rh{k}` at offset 8,
+  so HLIL builds a complete 128-bit result.
+- Float returns use a same-size `fconvert` identity in the epilogue.  Without
+  it, Binary Ninja folds a float constant copied through an integer register
+  into an integer constant and HLIL shows the raw bits (`0x3fc00000`).  With
+  the conversion, HLIL prints `fconvert.s(1.5f)` / `fconvert.d(3.14159...)`.

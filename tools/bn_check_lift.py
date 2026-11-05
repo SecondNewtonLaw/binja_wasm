@@ -135,13 +135,19 @@ def main(bv):
             p(f"  HLIL failed: {exc}")
 
         text = "\n".join(lines)
+        try:
+            hlil_text = str(func.hlil) if func.hlil is not None else ""
+        except Exception:  # noqa: BLE001
+            hlil_text = ""
         checks = []
         if name == "uninit_local":
             checks.append(("zero-init local", "ld0 = 0" in text))
         if name == "many_args":
             checks.append(("a9 read", "a9" in text))
         if name == "multi3":
-            checks.append(("r2 written", "r2" in text))
+            checks.append(("tuple return type", "struct {" in hlil_text and ".r2" in hlil_text))
+        if name == "call_multi":
+            checks.append(("call returns tuple", "return multi3(" in hlil_text))
         if name in ("g0_set_const", "g0_via_local"):
             checks.append(("g0 write not nop", "g0 = " in text or "g0 =" in text))
         if name == "g1_bump":
@@ -153,11 +159,13 @@ def main(bv):
         if name == "clz":
             checks.append(("direct intrinsic", "__builtin_i32_clz" in text and "t8" not in text))
         if name == "float32_const":
-            checks.append(("float displayed", "1.5" in text))
+            checks.append(("float32 displayed", "1.5f" in hlil_text))
+        if name == "float64_const":
+            checks.append(("float64 displayed", "3.1415926535897931" in hlil_text))
         if name == "apply_indirect":
             checks.append(("table_target", "__builtin_table_target" in text))
-        if name == "v128_id":
-            checks.append(("64-bit split/join", "0x40" in text or "64" in text))
+        if name in ("v128_id", "v128_select"):
+            checks.append(("uint128 result", "uint128_t" in hlil_text and "result:8" in hlil_text))
         if name == "simd_spill":
             checks.append(("16-byte tv0 result", "tv0" in text))
         if name == "simd_scalar":

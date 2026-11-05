@@ -40,6 +40,9 @@ public:
     }
     uint32_t GetIntegerReturnValueRegister() override { return regId(Bank::R, 0); }
     uint32_t GetHighIntegerReturnValueRegister() override { return regId(Bank::R, 1); }
+    // WASM uses one result bank for every value type; float/double returns live
+    // in the same R0 register as integer returns.
+    uint32_t GetFloatReturnValueRegister() override { return regId(Bank::R, 0); }
 };
 
 std::string hex(int64_t v) {

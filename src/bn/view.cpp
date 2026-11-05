@@ -216,14 +216,83 @@ bool WasmView::Init() {
 
 namespace {
 
+// v128 is one 16-byte value, not two unrelated 8-byte numbers.  Keeping it as a
+// 128-bit integer means locals, parameters, SIMD temporaries and returns all
+// print with the same type instead of looking like split u64 halves.
 Ref<Type> valueType(uint8_t t, bool ptr = false) {
     switch (t) {
     case wasm::kI32: return ptr ? Type::PointerType(4, Type::VoidType()) : Type::IntegerType(4, true);
     case wasm::kI64: return Type::IntegerType(8, true);
     case wasm::kF32: return Type::FloatType(4);
     case wasm::kF64: return Type::FloatType(8);
+    case wasm::kV128: return Type::IntegerType(16, false);
     default: return Type::IntegerType(8, true);
     }
+}
+
+size_t valueWidth(uint8_t t) {
+    switch (t) {
+    case wasm::kI32:
+    case wasm::kF32: return 4;
+    case wasm::kV128: return 16;
+    default: return 8;
+    }
+}
+
+// Several WASM results become one tuple type.  The fields are packed so their
+// offsets match the return-location components below; BN then reconstructs the
+// tuple from the result registers when it builds MLIL/HLIL.
+Ref<Type> returnType(const wasm::FuncType &sig, bool ptr) {
+    if (sig.results.empty())
+        return Type::VoidType();
+    if (sig.results.size() == 1)
+        return valueType(sig.results[0], ptr);
+    StructureBuilder tuple(StructStructureType, true);
+    size_t offset = 0;
+    for (size_t k = 0; k < sig.results.size(); ++k) {
+        tuple.AddMemberAtOffset(valueType(sig.results[k]), std::format("r{}", k), offset);
+        offset += valueWidth(sig.results[k]);
+    }
+    return Type::StructureType(tuple.Finalize());
+}
+
+// A value location tells the decompiler which register(s) hold each part of
+// the return value.  Without this BN only knows the single default return
+// register and drops everything after the first result / the high v128 half.
+ValueLocation returnLocation(const wasm::FuncType &sig) {
+    std::vector<ValueLocationComponent> components;
+    size_t offset = 0;
+    for (size_t k = 0; k < sig.results.size(); ++k) {
+        const uint8_t type = sig.results[k];
+        if (k < kNResults) {
+            if (type == wasm::kV128) {
+                components.emplace_back(Variable(RegisterVariableSourceType, regId(Bank::R, k)),
+                                        static_cast<int64_t>(offset), 8);
+                components.emplace_back(Variable(RegisterVariableSourceType, regId(Bank::Rh, k)),
+                                        static_cast<int64_t>(offset + 8), 8);
+            } else {
+                components.emplace_back(Variable(RegisterVariableSourceType, regId(Bank::R, k)),
+                                        static_cast<int64_t>(offset), valueWidth(type));
+            }
+        }
+        offset += valueWidth(type);
+    }
+    return ValueLocation(std::move(components));
+}
+
+// v128 arguments arrive in A{k} plus its upper-half Ah{k}; scalar arguments
+// occupy only the low 4/8 bytes of A{k}.  Explicit sizes keep float values
+// from being read as full 64-bit integers.
+ValueLocation parameterLocation(const wasm::FuncType &sig, size_t k) {
+    const uint8_t type = sig.params[k];
+    if (type == wasm::kV128) {
+        return ValueLocation({
+            ValueLocationComponent(Variable(RegisterVariableSourceType, regId(Bank::A, k)), 0, 8),
+            ValueLocationComponent(Variable(RegisterVariableSourceType, regId(Bank::Ah, k)), 8, 8),
+        });
+    }
+    return ValueLocation(
+        {ValueLocationComponent(Variable(RegisterVariableSourceType, regId(Bank::A, k)), 0, valueWidth(type))});
 }
 
 class WasmDebugInfoParser : public CustomDebugInfoParser {
@@ -242,15 +311,22 @@ public:
             const wasm::FuncType *sig = m.funcSig(i);
             if (!sig)
                 continue;
-            std::vector<FunctionParameter> params;
             const auto &pi = st->ptrs;
-            for (size_t k = 0; k < sig->params.size(); ++k)
-                params.emplace_back("a" + std::to_string(k),
-                                    valueType(sig->params[k], i < pi.param.size() && k < pi.param[i].size() && pi.param[i][k]));
-            Ref<Type> ret = sig->results.empty() ? Type::VoidType() : valueType(sig->results[0], i < pi.ret.size() && pi.ret[i]);
+            std::vector<FunctionParameter> params;
+            for (size_t k = 0; k < sig->params.size(); ++k) {
+                const bool ptr = i < pi.param.size() && k < pi.param[i].size() && pi.param[i][k];
+                params.emplace_back("a" + std::to_string(k), valueType(sig->params[k], ptr), CustomLocationSource,
+                                    parameterLocation(*sig, k));
+            }
+            const bool ptrRet = i < pi.ret.size() && pi.ret[i];
+            ReturnValue rv(returnType(*sig, ptrRet));
+            if (!sig->results.empty()) {
+                rv.defaultLocation = false;
+                rv.location = Confidence<ValueLocation>(returnLocation(*sig), 255);
+            }
             const auto &f = m.functions[i];
             DebugFunctionInfo fn(f.name, f.name, f.name, funcAddress(m, i), nullptr, platform, {}, {});
-            fn.type = Type::FunctionType(ret, nullptr, params);
+            fn.type = Type::FunctionType(rv, nullptr, params);
             info->AddFunction(fn);
         }
         return true;

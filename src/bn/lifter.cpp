@@ -245,6 +245,15 @@ private:
                 const ExprId v = vreg(h_ - nres + k);
                 add(il_.SetRegister(8, regId(Bank::R, k), il_.LowPart(8, v)));
                 add(il_.SetRegister(8, regId(Bank::Rh, k), il_.LowPart(8, il_.LogicalShiftRight(16, vreg(h_ - nres + k), il_.Const(1, 64)))));
+            } else if (sig_->results[k] == wasm::kF32) {
+                // A bare register copy loses the float type when the decompiler
+                // folds the constant, and HLIL then prints the raw bit pattern.
+                // A same-size FloatConvert is an exact identity that keeps the
+                // expression float-typed (HLIL: fconvert.s(1.5f)).
+                add(il_.SetRegister(4, regId(Bank::R, k),
+                                    il_.FloatConvert(4, il_.LowPart(4, reg(h_ - nres + k)))));
+            } else if (sig_->results[k] == wasm::kF64) {
+                add(il_.SetRegister(8, regId(Bank::R, k), il_.FloatConvert(8, reg(h_ - nres + k))));
             } else {
                 add(il_.SetRegister(8, regId(Bank::R, k), reg(h_ - nres + k)));
             }
@@ -263,6 +272,8 @@ private:
                 add(il_.SetRegister(8, regId(Bank::A, k), il_.LowPart(8, vreg(base + k))));
                 add(il_.SetRegister(8, regId(Bank::Ah, k),
                                     il_.LowPart(8, il_.LogicalShiftRight(16, vreg(base + k), il_.Const(1, 64)))));
+            } else if (sig->params[k] == wasm::kF32) {
+                add(il_.SetRegister(4, regId(Bank::A, k), reg(base + k, 4)));
             } else {
                 add(il_.SetRegister(8, regId(Bank::A, k), reg(base + k)));
             }
@@ -273,6 +284,8 @@ private:
             if (sig->results[k] == wasm::kV128) {
                 vwrite(h_, joinHalves(regId(Bank::R, k), regId(Bank::Rh, k)));
                 ++h_;
+            } else if (sig->results[k] == wasm::kF32) {
+                push(il_.Register(4, regId(Bank::R, k)), 4);
             } else {
                 push(il_.Register(8, regId(Bank::R, k)));
             }
