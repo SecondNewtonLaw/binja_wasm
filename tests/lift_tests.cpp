@@ -410,6 +410,44 @@ namespace {
             checkBinary(op, F64, F64, f64Inputs(), "f64.bin");
     }
 
+    /// Pins the Wasm min/max signed-zero and NaN rules with explicit expected
+    /// bits. The numeric matrix only requires the oracle and the IL emulation to
+    /// agree, so it cannot catch a wrong result both sides share.
+    void testMinMaxSemantics() {
+        const float pzf = 0.0f, nzf = -0.0f;
+        const double pzd = 0.0, nzd = -0.0;
+
+        CHECK_EQ(std::bit_cast<uint32_t>(wasmtest::wasmMin(pzf, nzf)), 0x80000000u);
+        CHECK_EQ(std::bit_cast<uint32_t>(wasmtest::wasmMin(nzf, pzf)), 0x80000000u);
+        CHECK_EQ(std::bit_cast<uint32_t>(wasmtest::wasmMax(pzf, nzf)), 0x00000000u);
+        CHECK_EQ(std::bit_cast<uint32_t>(wasmtest::wasmMax(nzf, pzf)), 0x00000000u);
+
+        CHECK_EQ(std::bit_cast<uint64_t>(wasmtest::wasmMin(pzd, nzd)), 0x8000000000000000ull);
+        CHECK_EQ(std::bit_cast<uint64_t>(wasmtest::wasmMin(nzd, pzd)), 0x8000000000000000ull);
+        CHECK_EQ(std::bit_cast<uint64_t>(wasmtest::wasmMax(pzd, nzd)), 0x0000000000000000ull);
+        CHECK_EQ(std::bit_cast<uint64_t>(wasmtest::wasmMax(nzd, pzd)), 0x0000000000000000ull);
+
+        const float nanf = std::numeric_limits<float>::quiet_NaN();
+        const double nand = std::numeric_limits<double>::quiet_NaN();
+        CHECK(std::isnan(wasmtest::wasmMin(nanf, 1.0f)));
+        CHECK(std::isnan(wasmtest::wasmMin(1.0f, nanf)));
+        CHECK(std::isnan(wasmtest::wasmMax(nanf, 1.0f)));
+        CHECK(std::isnan(wasmtest::wasmMax(1.0f, nanf)));
+        CHECK(std::isnan(wasmtest::wasmMin(nand, 1.0)));
+        CHECK(std::isnan(wasmtest::wasmMin(1.0, nand)));
+        CHECK(std::isnan(wasmtest::wasmMax(nand, 1.0)));
+        CHECK(std::isnan(wasmtest::wasmMax(1.0, nand)));
+
+        CHECK_EQ(wasmtest::wasmMin(1.0f, 2.0f), 1.0f);
+        CHECK_EQ(wasmtest::wasmMin(2.0f, 1.0f), 1.0f);
+        CHECK_EQ(wasmtest::wasmMax(1.0f, 2.0f), 2.0f);
+        CHECK_EQ(wasmtest::wasmMax(2.0f, 1.0f), 2.0f);
+        CHECK_EQ(wasmtest::wasmMin(1.0, 2.0), 1.0);
+        CHECK_EQ(wasmtest::wasmMin(2.0, 1.0), 1.0);
+        CHECK_EQ(wasmtest::wasmMax(1.0, 2.0), 2.0);
+        CHECK_EQ(wasmtest::wasmMax(2.0, 1.0), 2.0);
+    }
+
     // ---------------------------------------------------------------------------
     // Conversions
     // ---------------------------------------------------------------------------
@@ -1658,6 +1696,7 @@ int main(int argc, char **argv) {
         {"numeric_i64", testNumericI64},
         {"numeric_f32", testNumericF32},
         {"numeric_f64", testNumericF64},
+        {"minmax_semantics", testMinMaxSemantics},
         {"conversions", testConversions},
         {"trunc_sat", testTruncSat},
         {"memory_loads", testMemoryLoads},
