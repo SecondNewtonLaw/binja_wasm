@@ -42,6 +42,31 @@ namespace wasmtest {
     inline float f32(const Value &v) { return std::bit_cast<float>(static_cast<uint32_t>(v.lo)); }
     inline double f64(const Value &v) { return std::bit_cast<double>(v.lo); }
 
+    // Wasm min/max are IEEE 754-2019 minimumNumber/maximumNumber: a NaN operand
+    // propagates, and zeros keep their sign (min(+0,-0) = -0, max(+0,-0) = +0).
+    // Host fmin/fmax disagree on the signed-zero cases (glibc returns the first
+    // operand when the values compare equal), so spell the semantics out.
+    template<typename T>
+    inline T wasmMin(T x, T y) {
+        if (std::isnan(x) || std::isnan(y))
+            return std::numeric_limits<T>::quiet_NaN();
+        if (x < y)
+            return x;
+        if (y < x)
+            return y;
+        return std::signbit(x) ? x : y;
+    }
+    template<typename T>
+    inline T wasmMax(T x, T y) {
+        if (std::isnan(x) || std::isnan(y))
+            return std::numeric_limits<T>::quiet_NaN();
+        if (x > y)
+            return x;
+        if (y > x)
+            return y;
+        return std::signbit(x) ? y : x;
+    }
+
     struct WasmTrap : std::runtime_error {
         using std::runtime_error::runtime_error;
     };
@@ -1128,10 +1153,10 @@ namespace wasmtest {
                         r = x / y;
                         break;
                     case 4:
-                        r = std::isnan(x) || std::isnan(y) ? std::numeric_limits<float>::quiet_NaN() : std::fmin(x, y);
+                        r = wasmMin(x, y);
                         break;
                     case 5:
-                        r = std::isnan(x) || std::isnan(y) ? std::numeric_limits<float>::quiet_NaN() : std::fmax(x, y);
+                        r = wasmMax(x, y);
                         break;
                     case 6:
                         r = std::copysign(x, y);
@@ -1155,10 +1180,10 @@ namespace wasmtest {
                         r = x / y;
                         break;
                     case 4:
-                        r = std::isnan(x) || std::isnan(y) ? std::numeric_limits<double>::quiet_NaN() : std::fmin(x, y);
+                        r = wasmMin(x, y);
                         break;
                     case 5:
-                        r = std::isnan(x) || std::isnan(y) ? std::numeric_limits<double>::quiet_NaN() : std::fmax(x, y);
+                        r = wasmMax(x, y);
                         break;
                     case 6:
                         r = std::copysign(x, y);

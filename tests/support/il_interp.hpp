@@ -938,8 +938,8 @@ namespace lift_test {
             if (name == "__builtin_f32_min" || name == "__builtin_f32_max" || name == "__builtin_f32_copysign") {
                 need(2);
                 const float x = asF32(p[0]), y = asF32(p[1]);
-                const float r = name.ends_with("min")   ? (std::isnan(x) || std::isnan(y) ? std::numeric_limits<float>::quiet_NaN() : std::fmin(x, y))
-                                : name.ends_with("max") ? (std::isnan(x) || std::isnan(y) ? std::numeric_limits<float>::quiet_NaN() : std::fmax(x, y))
+                const float r = name.ends_with("min")   ? wasmtest::wasmMin(x, y)
+                                : name.ends_with("max") ? wasmtest::wasmMax(x, y)
                                                         : std::copysign(x, y);
                 out(0, {std::bit_cast<uint32_t>(r), 0});
                 return;
@@ -947,8 +947,8 @@ namespace lift_test {
             if (name == "__builtin_f64_min" || name == "__builtin_f64_max" || name == "__builtin_f64_copysign") {
                 need(2);
                 const double x = asF64(p[0]), y = asF64(p[1]);
-                const double r = name.ends_with("min")   ? (std::isnan(x) || std::isnan(y) ? std::numeric_limits<double>::quiet_NaN() : std::fmin(x, y))
-                                 : name.ends_with("max") ? (std::isnan(x) || std::isnan(y) ? std::numeric_limits<double>::quiet_NaN() : std::fmax(x, y))
+                const double r = name.ends_with("min")   ? wasmtest::wasmMin(x, y)
+                                 : name.ends_with("max") ? wasmtest::wasmMax(x, y)
                                                          : std::copysign(x, y);
                 out(0, {std::bit_cast<uint64_t>(r), 0});
                 return;
