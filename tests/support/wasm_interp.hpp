@@ -46,6 +46,9 @@ namespace wasmtest {
     // propagates, and zeros keep their sign (min(+0,-0) = -0, max(+0,-0) = +0).
     // Host fmin/fmax disagree on the signed-zero cases (glibc returns the first
     // operand when the values compare equal), so spell the semantics out.
+
+    /// Returns the Wasm minimum of x and y: NaN propagates and, when both
+    /// operands are zeros of different signs, the result is -0.
     template<typename T>
     inline T wasmMin(T x, T y) {
         if (std::isnan(x) || std::isnan(y))
@@ -56,6 +59,9 @@ namespace wasmtest {
             return y;
         return std::signbit(x) ? x : y;
     }
+
+    /// Returns the Wasm maximum of x and y: NaN propagates and, when both
+    /// operands are zeros of different signs, the result is +0.
     template<typename T>
     inline T wasmMax(T x, T y) {
         if (std::isnan(x) || std::isnan(y))
